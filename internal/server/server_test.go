@@ -24,12 +24,13 @@ import (
 )
 
 const testUserID = "user-1"
+const maxUploadFileSize = 10 << 20
 
 // newTestServer starts an httptest.Server backed by the real chi router.
 // staticDir is empty: tests never mount the SPA.
 func newTestServer(t *testing.T, svc Service) *httptest.Server {
 	t.Helper()
-	h := handlers.NewHandler(svc, nil)
+	h := handlers.NewHandler(svc, nil, maxUploadFileSize)
 	ts := httptest.NewServer(NewRouter(h, "", nil))
 	t.Cleanup(ts.Close)
 	return ts
@@ -65,7 +66,7 @@ func newMultipartBody(
 
 func TestNewServer(t *testing.T) {
 	svc := NewMockService(t)
-	h := handlers.NewHandler(svc, nil)
+	h := handlers.NewHandler(svc, nil, maxUploadFileSize)
 
 	t.Run("ok", func(t *testing.T) {
 		srv, err := NewServer("127.0.0.1:0", h, time.Second, time.Second, "", nil)
@@ -82,7 +83,7 @@ func TestNewServer(t *testing.T) {
 func TestServer_ListenAndServe_Shutdown(t *testing.T) {
 	svc := NewMockService(t)
 	svc.On("Close", mock.Anything).Return(nil)
-	h := handlers.NewHandler(svc, nil)
+	h := handlers.NewHandler(svc, nil, maxUploadFileSize)
 
 	srv, err := NewServer("127.0.0.1:0", h, time.Second, time.Second, "", nil)
 	require.NoError(t, err)

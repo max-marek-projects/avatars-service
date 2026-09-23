@@ -18,6 +18,8 @@ import (
 	"github.com/max-marek-projects/avatars-service/internal/services"
 )
 
+const maxUploadFileSize = 10 << 20
+
 // ---------- POST /api/v1/avatars ----------
 
 func TestUploadAvatar(t *testing.T) {
@@ -47,7 +49,7 @@ func TestUploadAvatar(t *testing.T) {
 		UploadAvatar(mock.Anything, testUserID, mock.Anything, "boom.png", "image/png", int64(4)).
 		Return(nil, errors.New("db down"))
 
-	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil)))
+	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil, maxUploadFileSize)))
 	defer ts.Close()
 
 	type want struct {
@@ -146,7 +148,7 @@ func TestGetAvatarByID(t *testing.T) {
 		GetAvatarByID(mock.Anything, mock.Anything).
 		Return(nil, nil, services.ErrAvatarNotFound)
 
-	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil)))
+	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil, maxUploadFileSize)))
 	defer ts.Close()
 
 	type want struct {
@@ -212,7 +214,7 @@ func TestGetAvatarMetadata(t *testing.T) {
 		GetAvatarMetadata(mock.Anything, mock.Anything).
 		Return(nil, services.ErrAvatarNotFound)
 
-	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil)))
+	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil, maxUploadFileSize)))
 	defer ts.Close()
 
 	type want struct {
@@ -280,7 +282,7 @@ func TestDeleteAvatar(t *testing.T) {
 		DeleteAvatar(mock.Anything, notFoundID, testUserID).
 		Return(services.ErrAvatarNotFound)
 
-	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil)))
+	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil, maxUploadFileSize)))
 	defer ts.Close()
 
 	tests := []struct {
@@ -321,7 +323,7 @@ func TestGetActiveAvatar(t *testing.T) {
 		GetActiveAvatar(mock.Anything, mock.Anything).
 		Return(nil, nil, services.ErrAvatarNotFound)
 
-	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil)))
+	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil, maxUploadFileSize)))
 	defer ts.Close()
 
 	type want struct {
@@ -368,7 +370,7 @@ func TestDeleteActiveUserAvatar(t *testing.T) {
 		DeleteActiveUserAvatar(mock.Anything, "missing-user").
 		Return(services.ErrAvatarNotFound)
 
-	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil)))
+	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil, maxUploadFileSize)))
 	defer ts.Close()
 
 	tests := []struct {
@@ -408,7 +410,7 @@ func TestListUserAvatars(t *testing.T) {
 		ListUserAvatars(mock.Anything, "boom").
 		Return(nil, errors.New("db down"))
 
-	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil)))
+	ts := httptest.NewServer(newAPITestRouter(NewHandler(mockService, nil, maxUploadFileSize)))
 	defer ts.Close()
 
 	type want struct {
@@ -477,7 +479,7 @@ func TestHealth(t *testing.T) {
 		})
 
 	t.Run("200 ok", func(t *testing.T) {
-		ts := httptest.NewServer(newAPITestRouter(NewHandler(okService, nil)))
+		ts := httptest.NewServer(newAPITestRouter(NewHandler(okService, nil, maxUploadFileSize)))
 		defer ts.Close()
 
 		resp, _ := testRequest(t, ts, http.MethodGet, "/health", "", "")
@@ -486,7 +488,7 @@ func TestHealth(t *testing.T) {
 	})
 
 	t.Run("503 degraded", func(t *testing.T) {
-		ts := httptest.NewServer(newAPITestRouter(NewHandler(degradedService, nil)))
+		ts := httptest.NewServer(newAPITestRouter(NewHandler(degradedService, nil, maxUploadFileSize)))
 		defer ts.Close()
 
 		resp, _ := testRequest(t, ts, http.MethodGet, "/health", "", "")

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 var uploadTmpl = template.Must(template.New("upload").Parse(`<!doctype html>
@@ -25,6 +26,11 @@ var galleryTmpl = template.Must(template.New("gallery").Parse(`<!doctype html>
   <li>
     <img src="/api/v1/avatars/{{.ID}}" width="100" alt="{{.FileName}}">
     <code>{{.ID}}</code>
+    <form action="/web/avatars/{{.ID}}/delete" method="post" style="display:inline"
+          onsubmit="return confirm('Delete this avatar?')">
+      <input type="hidden" name="user_id" value="{{$.UserID}}">
+      <button type="submit">Delete</button>
+    </form>
   </li>
 {{end}}
 </ul>
@@ -41,8 +47,8 @@ func (h *Handler) WebUploadForm(w http.ResponseWriter, r *http.Request) {
 
 // WebUpload handles POST /web/upload.
 func (h *Handler) WebUpload(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, h.maxUploadSize)
+	if err := r.ParseMultipartForm(h.maxUploadSize); err != nil {
 		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
 		return
 	}
@@ -86,4 +92,29 @@ func (h *Handler) WebGallery(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		h.logger.Error("handler: render gallery failed", "error", err)
 	}
+}
+
+// WebDeleteAvatar handles POST /web/avatars/{avatar_id}/delete.
+// Browsers cannot send DELETE from a plain form, so this is a POST
+// that performs the deletion and redirects back to the gallery.
+func (h *Handler) WebDeleteAvatar(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "avatar_id"))
+	if err != nil {
+		http.Error(w, "invalid avatar id", http.StatusBadRequest)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	userID := r.FormValue("user_id")
+	if userID == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+	if err := h.service.DeleteAvatar(r.Context(), id, userID); err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/web/gallery/"+userID, http.StatusSeeOther)
 }

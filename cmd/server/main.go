@@ -101,7 +101,7 @@ func run() error {
 	}
 
 	// 5. HTTP handler + server.
-	h := handlers.NewHandler(svc, log)
+	h := handlers.NewHandler(svc, log, cfg.MaxFileSize)
 	srv, err := server.NewServer(
 		cfg.RunAddr,
 		h,

@@ -10,21 +10,19 @@ import (
 	"github.com/max-marek-projects/avatars-service/internal/models"
 )
 
-// maxUploadSize is the hard cap for a single uploaded file (10 MiB).
-const maxUploadSize = 10 << 20
-
 // Handler holds HTTP-layer dependencies.
 type Handler struct {
-	service Service
-	logger  *slog.Logger
+	service       Service
+	logger        *slog.Logger
+	maxUploadSize int64
 }
 
 // NewHandler builds a Handler with defaults.
-func NewHandler(service Service, logger *slog.Logger) *Handler {
+func NewHandler(service Service, logger *slog.Logger, maxUploadSize int64) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Handler{service: service, logger: logger}
+	return &Handler{service: service, logger: logger, maxUploadSize: maxUploadSize}
 }
 
 // Close releases resources owned by the handler (delegates to the service).

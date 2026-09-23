@@ -118,7 +118,7 @@ func LoadConfig() (config *Config, err error) {
 		RabbitExchange:   "avatars.exchange",
 		RabbitUploadKey:  "avatar.uploaded",
 		RabbitDeleteKey:  "avatar.deleted",
-		MaxFileSize:      10 * 1024 * 1024, // 10 MiB
+		MaxFileSize:      10 << 20, // 10 MiB
 		AllowedMimeTypes: []string{"image/jpeg", "image/png", "image/webp"},
 		StaticDir:        "./web/static",
 	}

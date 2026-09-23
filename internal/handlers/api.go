@@ -30,8 +30,8 @@ func (h *Handler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enforce the hard cap before touching the body.
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, h.maxUploadSize)
+	if err := r.ParseMultipartForm(h.maxUploadSize); err != nil {
 		h.logger.Warn("handler: multipart parse failed", slog.Any("error", err))
 		writeError(w, http.StatusRequestEntityTooLarge, "file too large")
 		return

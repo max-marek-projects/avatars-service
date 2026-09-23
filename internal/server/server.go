@@ -104,6 +104,7 @@ func NewRouter(h *handlers.Handler, staticDir string, logger *slog.Logger) chi.R
 		r.Get("/upload", h.WebUploadForm)
 		r.Post("/upload", h.WebUpload)
 		r.Get("/gallery/{user_id}", h.WebGallery)
+		r.Post("/avatars/{avatar_id}/delete", h.WebDeleteAvatar)
 	})
 
 	if staticDir != "" {
