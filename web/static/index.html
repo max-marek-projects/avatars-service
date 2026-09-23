@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avatars-Service - API Explorer</title>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <style>
+        .page {
+            display: none;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        .nav-link.active {
+            background-color: rgba(255, 255, 255, 0.15);
+            border-left-color: rgb(147 51 234);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-get {
+            background: #2563eb;
+            color: white;
+        }
+
+        .badge-post {
+            background: #16a34a;
+            color: white;
+        }
+
+        .badge-delete {
+            background: #dc2626;
+            color: white;
+        }
+
+        pre {
+            tab-size: 2;
+        }
+
+        .avatar-card-enter {
+            animation: fadeIn 0.25s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(4px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+
+<body class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
+    <div class="flex flex-col md:flex-row min-h-screen">
+
+        <!-- Sidebar -->
+        <aside class="md:w-72 bg-black/30 backdrop-blur-lg border-r border-white/10 md:min-h-screen">
+            <div class="p-6 border-b border-white/10">
+                <h1 class="text-xl font-bold">Avatars-Service</h1>
+                <p class="text-xs text-white/50 mt-1">API Explorer</p>
+            </div>
+
+            <nav class="p-3 space-y-1">
+                <p class="px-3 pt-3 pb-1 text-xs uppercase tracking-wider text-white/40">General</p>
+                <a href="#/dashboard" data-page="dashboard"
+                    class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 transition border-l-2 border-transparent">
+                    <span class="text-white/60">◆</span> <span>Dashboard</span>
+                </a>
+                <a href="#/health" data-page="health"
+                    class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 transition border-l-2 border-transparent">
+                    <span class="badge badge-get">GET</span> <span class="text-sm">/health</span>
+                </a>
+
+                <p class="px-3 pt-4 pb-1 text-xs uppercase tracking-wider text-white/40">Avatars</p>
+                <a href="#/upload" data-page="upload"
+                    class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 transition border-l-2 border-transparent">
+                    <span class="badge badge-post">POST</span> <span class="text-sm">Upload</span>
+                </a>
+                <a href="#/get-avatar" data-page="get-avatar"
+                    class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 transition border-l-2 border-transparent">
+                    <span class="badge badge-get">GET</span> <span class="text-sm">By ID</span>
+                </a>
+                <a href="#/get-active" data-page="get-active"
+                    class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 transition border-l-2 border-transparent">
+                    <span class="badge badge-get">GET</span> <span class="text-sm">Active</span>
+                </a>
+                <a href="#/metadata" data-page="metadata"
+                    class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 transition border-l-2 border-transparent">
+                    <span class="badge badge-get">GET</span> <span class="text-sm">Metadata</span>
+                </a>
+                <a href="#/list" data-page="list"
+                    class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 transition border-l-2 border-transparent">
+                    <span class="badge badge-get">GET</span> <span class="text-sm">List user</span>
+                </a>
+                <a href="#/delete-avatar" data-page="delete-avatar"
+                    class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 transition border-l-2 border-transparent">
+                    <span class="badge badge-delete">DEL</span> <span class="text-sm">By ID</span>
+                </a>
+                <a href="#/delete-active" data-page="delete-active"
+                    class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 transition border-l-2 border-transparent">
+                    <span class="badge badge-delete">DEL</span> <span class="text-sm">Active</span>
+                </a>
+
+                <p class="px-3 pt-4 pb-1 text-xs uppercase tracking-wider text-white/40">Server-rendered</p>
+                <a href="/web/upload" target="_blank"
+                    class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 transition border-l-2 border-transparent">
+                    <span class="text-white/60">↗</span> <span class="text-sm">/web/upload</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main -->
+        <main class="flex-1 p-6 md:p-10 max-w-4xl">
+
+            <!-- ============ DASHBOARD ============ -->
+            <section id="page-dashboard" class="page">
+                <h2 class="text-3xl font-bold mb-2">Dashboard</h2>
+                <p class="text-white/60 mb-8">Every endpoint of the service on one page. Each form sends a real request
+                    and shows the response.</p>
+
+                <div class="grid md:grid-cols-2 gap-4">
+                    <div class="bg-white/5 border border-white/10 rounded-xl p-5">
+                        <h3 class="font-semibold mb-3">Quick links</h3>
+                        <ul class="text-sm space-y-1 text-white/70">
+                            <li>• <a href="#/health" class="hover:text-purple-300">Health check</a></li>
+                            <li>• <a href="#/upload" class="hover:text-purple-300">Upload an avatar</a></li>
+                            <li>• <a href="#/list" class="hover:text-purple-300">List user avatars</a></li>
+                        </ul>
+                    </div>
+                    <div class="bg-white/5 border border-white/10 rounded-xl p-5">
+                        <h3 class="font-semibold mb-3">Recently used</h3>
+                        <p class="text-xs text-white/50">Stored in localStorage, auto-filled into forms.</p>
+                        <div class="mt-3 space-y-2">
+                            <div>
+                                <label class="text-xs text-white/50">Avatar ID</label>
+                                <input id="stateAvatarId" readonly
+                                    class="w-full mt-1 px-3 py-1.5 bg-black/30 border border-white/10 rounded text-xs font-mono text-white/80">
+                            </div>
+                            <div>
+                                <label class="text-xs text-white/50">User ID</label>
+                                <input id="stateUserId" readonly
+                                    class="w-full mt-1 px-3 py-1.5 bg-black/30 border border-white/10 rounded text-xs font-mono text-white/80">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ HEALTH ============ -->
+            <section id="page-health" class="page">
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="badge badge-get">GET</span>
+                    <code class="text-white/80">/health</code>
+                </div>
+                <h2 class="text-3xl font-bold mb-2">Health check</h2>
+                <p class="text-white/60 mb-8">Checks PostgreSQL, S3/MinIO, and RabbitMQ. Returns 200 when healthy, 503
+                    when degraded.</p>
+
+                <button onclick="runHealth()"
+                    class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 font-semibold py-3 px-6 rounded-lg transition">
+                    Send request
+                </button>
+
+                <div id="res-health" class="mt-6 hidden">
+                    <div class="text-sm font-mono px-3 py-2 rounded-lg mb-3" id="res-health-status"></div>
+                    <pre id="res-health-body" class="bg-black/40 rounded-lg p-4 overflow-x-auto text-xs"></pre>
+                </div>
+            </section>
+
+            <!-- ============ UPLOAD ============ -->
+            <section id="page-upload" class="page">
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="badge badge-post">POST</span>
+                    <code class="text-white/80">/api/v1/avatars</code>
+                </div>
+                <h2 class="text-3xl font-bold mb-2">Upload avatar</h2>
+                <p class="text-white/60 mb-8">Multipart request with the <code
+                        class="bg-black/30 px-1.5 py-0.5 rounded">file</code> field. Requires the <code
+                        class="bg-black/30 px-1.5 py-0.5 rounded">X-User-ID</code> header. Max — 10 MiB.</p>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">User ID <span
+                                class="text-red-400">*</span></label>
+                        <input id="up-userId" type="text" placeholder="demo-user"
+                            class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2">File <span class="text-red-400">*</span></label>
+                        <input id="up-file" type="file" accept="image/*"
+                            class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-purple-600 file:text-white hover:file:bg-purple-700">
+                        <div id="up-preview" class="mt-3 hidden">
+                            <img id="up-preview-img" class="w-24 h-24 object-cover rounded-lg shadow-lg">
+                        </div>
+                    </div>
+                    <button onclick="runUpload()" id="up-btn"
+                        class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 font-semibold py-3 px-6 rounded-lg transition">
+                        Upload
+                    </button>
+                </div>
+
+                <div id="res-upload" class="mt-6 hidden">
+                    <div class="text-sm font-mono px-3 py-2 rounded-lg mb-3" id="res-upload-status"></div>
+                    <pre id="res-upload-body" class="bg-black/40 rounded-lg p-4 overflow-x-auto text-xs"></pre>
+                </div>
+            </section>
+
+            <!-- ============ GET BY ID ============ -->
+            <section id="page-get-avatar" class="page">
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="badge badge-get">GET</span>
+                    <code class="text-white/80">/api/v1/avatars/{avatar_id}</code>
+                </div>
+                <h2 class="text-3xl font-bold mb-2">Get avatar by ID</h2>
+                <p class="text-white/60 mb-8">Returns the binary image. The response is shown as a preview plus raw
+                    headers.</p>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Avatar ID (UUID) <span
+                                class="text-red-400">*</span></label>
+                        <input id="ga-id" type="text" placeholder="00000000-0000-0000-0000-000000000000"
+                            class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg placeholder-white/40 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    </div>
+                    <p class="text-xs text-white/40 bg-black/20 border border-white/10 rounded-lg px-3 py-2">
+                        Resize and format conversion are not available in this build.
+                        The original image is always returned.
+                    </p>
+                    <button onclick="runGetAvatar()"
+                        class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 font-semibold py-3 px-6 rounded-lg transition">
+                        Fetch
+                    </button>
+                </div>
+
+                <div id="res-get-avatar" class="mt-6 hidden">
+                    <div class="text-sm font-mono px-3 py-2 rounded-lg mb-3" id="res-get-avatar-status"></div>
+                    <div id="res-get-avatar-preview" class="hidden mb-3">
+                        <img id="res-get-avatar-img" class="max-w-xs rounded-lg shadow-lg">
+                    </div>
+                    <div class="bg-black/40 rounded-lg p-4 mb-3">
+                        <p class="text-xs text-white/50 mb-2">Headers</p>
+                        <pre id="res-get-avatar-headers" class="text-xs overflow-x-auto"></pre>
+                    </div>
+                    <pre id="res-get-avatar-body"
+                        class="bg-black/40 rounded-lg p-4 overflow-x-auto text-xs hidden"></pre>
+                    <button onclick="quickDeleteAvatar()" id="ga-delete-btn"
+                        class="hidden mt-4 w-full bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 font-semibold py-3 px-6 rounded-lg transition">
+                        Delete this avatar
+                    </button>
+                </div>
+            </section>
+
+            <!-- ============ GET ACTIVE ============ -->
+            <section id="page-get-active" class="page">
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="badge badge-get">GET</span>
+                    <code class="text-white/80">/api/v1/users/{user_id}/avatar</code>
+                </div>
+                <h2 class="text-3xl font-bold mb-2">Active avatar of a user</h2>
+                <p class="text-white/60 mb-8">Returns the freshest avatar of the user. If there is none — a placeholder
+                    (when configured) or 404.</p>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">User ID <span
+                                class="text-red-400">*</span></label>
+                        <input id="act-userId" type="text" placeholder="demo-user"
+                            class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    </div>
+                    <button onclick="runGetActive()"
+                        class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 font-semibold py-3 px-6 rounded-lg transition">
+                        Fetch
+                    </button>
+                </div>
+
+                <div id="res-get-active" class="mt-6 hidden">
+                    <div class="text-sm font-mono px-3 py-2 rounded-lg mb-3" id="res-get-active-status"></div>
+                    <div id="res-get-active-preview" class="hidden mb-3">
+                        <img id="res-get-active-img" class="max-w-xs rounded-lg shadow-lg">
+                    </div>
+                    <div class="bg-black/40 rounded-lg p-4 mb-3">
+                        <p class="text-xs text-white/50 mb-2">Headers</p>
+                        <pre id="res-get-active-headers" class="text-xs overflow-x-auto"></pre>
+                    </div>
+                    <button onclick="quickDeleteActive()" id="act-delete-btn"
+                        class="hidden mt-4 w-full bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 font-semibold py-3 px-6 rounded-lg transition">
+                        Delete active avatar
+                    </button>
+                </div>
+            </section>
+
+            <!-- ============ METADATA ============ -->
+            <section id="page-metadata" class="page">
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="badge badge-get">GET</span>
+                    <code class="text-white/80">/api/v1/avatars/{avatar_id}/metadata</code>
+                </div>
+                <h2 class="text-3xl font-bold mb-2">Avatar metadata</h2>
+                <p class="text-white/60 mb-8">JSON with file name, MIME type, size, and the list of thumbnails.</p>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Avatar ID (UUID) <span
+                                class="text-red-400">*</span></label>
+                        <input id="meta-id" type="text" placeholder="00000000-0000-0000-0000-000000000000"
+                            class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg placeholder-white/40 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    </div>
+                    <button onclick="runMetadata()"
+                        class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 font-semibold py-3 px-6 rounded-lg transition">
+                        Fetch
+                    </button>
+                </div>
+
+                <div id="res-metadata" class="mt-6 hidden">
+                    <div class="text-sm font-mono px-3 py-2 rounded-lg mb-3" id="res-metadata-status"></div>
+                    <pre id="res-metadata-body" class="bg-black/40 rounded-lg p-4 overflow-x-auto text-xs"></pre>
+                </div>
+            </section>
+
+            <!-- ============ LIST ============ -->
+            <section id="page-list" class="page">
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="badge badge-get">GET</span>
+                    <code class="text-white/80">/api/v1/users/{user_id}/avatars</code>
+                </div>
+                <h2 class="text-3xl font-bold mb-2">All avatars of a user</h2>
+                <p class="text-white/60 mb-8">Every active (non-deleted) avatar of the user with a preview gallery.
+                    Delete directly from a card.</p>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">User ID <span
+                                class="text-red-400">*</span></label>
+                        <input id="list-userId" type="text" placeholder="demo-user"
+                            class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    </div>
+                    <button onclick="runList()"
+                        class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 font-semibold py-3 px-6 rounded-lg transition">
+                        Fetch list
+                    </button>
+                </div>
+
+                <div id="res-list" class="mt-6 hidden">
+                    <div class="text-sm font-mono px-3 py-2 rounded-lg mb-3" id="res-list-status"></div>
+                    <div id="res-list-gallery" class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4"></div>
+                    <pre id="res-list-body" class="bg-black/40 rounded-lg p-4 overflow-x-auto text-xs"></pre>
+                </div>
+            </section>
+
+            <!-- ============ DELETE BY ID ============ -->
+            <section id="page-delete-avatar" class="page">
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="badge badge-delete">DELETE</span>
+                    <code class="text-white/80">/api/v1/avatars/{avatar_id}</code>
+                </div>
+                <h2 class="text-3xl font-bold mb-2">Delete avatar by ID</h2>
+                <p class="text-white/60 mb-8">Soft delete. Verifies that <code
+                        class="bg-black/30 px-1.5 py-0.5 rounded">X-User-ID</code> matches the owner, otherwise 403.</p>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Avatar ID (UUID) <span
+                                class="text-red-400">*</span></label>
+                        <input id="del-id" type="text" placeholder="00000000-0000-0000-0000-000000000000"
+                            class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg placeholder-white/40 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2">X-User-ID <span
+                                class="text-red-400">*</span></label>
+                        <input id="del-userId" type="text" placeholder="demo-user"
+                            class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    </div>
+                    <button onclick="runDelete()"
+                        class="w-full bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 font-semibold py-3 px-6 rounded-lg transition">
+                        Delete
+                    </button>
+                </div>
+
+                <div id="res-delete" class="mt-6 hidden">
+                    <div class="text-sm font-mono px-3 py-2 rounded-lg mb-3" id="res-delete-status"></div>
+                    <pre id="res-delete-body" class="bg-black/40 rounded-lg p-4 overflow-x-auto text-xs"></pre>
+                </div>
+            </section>
+
+            <!-- ============ DELETE ACTIVE ============ -->
+            <section id="page-delete-active" class="page">
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="badge badge-delete">DELETE</span>
+                    <code class="text-white/80">/api/v1/users/{user_id}/avatar</code>
+                </div>
+                <h2 class="text-3xl font-bold mb-2">Delete active avatar</h2>
+                <p class="text-white/60 mb-8">Deletes the active avatar of the user whose ID is in the <code
+                        class="bg-black/30 px-1.5 py-0.5 rounded">X-User-ID</code> header.</p>
+
+                <div class="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mb-6 text-sm text-yellow-200">
+                    ⚠️ Make sure the ID below matches the header. Otherwise you may delete someone else's avatar.
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">User ID <span
+                                class="text-red-400">*</span></label>
+                        <input id="dact-userId" type="text" placeholder="demo-user"
+                            class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    </div>
+                    <button onclick="runDeleteActive()"
+                        class="w-full bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 font-semibold py-3 px-6 rounded-lg transition">
+                        Delete active
+                    </button>
+                </div>
+
+                <div id="res-delete-active" class="mt-6 hidden">
+                    <div class="text-sm font-mono px-3 py-2 rounded-lg mb-3" id="res-delete-active-status"></div>
+                    <pre id="res-delete-active-body" class="bg-black/40 rounded-lg p-4 overflow-x-auto text-xs"></pre>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script>
+        // ============================================================
+        // State
+        // ============================================================
+        const state = {
+            lastAvatarId: localStorage.getItem('lastAvatarId') || '',
+            lastUserId: localStorage.getItem('lastUserId') || '',
+        };
+
+        function remember(avatarId, userId) {
+            if (avatarId) { state.lastAvatarId = avatarId; localStorage.setItem('lastAvatarId', avatarId); }
+            if (userId) { state.lastUserId = userId; localStorage.setItem('lastUserId', userId); }
+            refreshStateFields();
+        }
+
+        function forget(avatarId) {
+            if (state.lastAvatarId === avatarId) {
+                state.lastAvatarId = '';
+                localStorage.removeItem('lastAvatarId');
+            }
+            refreshStateFields();
+        }
+
+        function refreshStateFields() {
+            const a = document.getElementById('stateAvatarId');
+            const u = document.getElementById('stateUserId');
+            if (a) a.value = state.lastAvatarId || '—';
+            if (u) u.value = state.lastUserId || '—';
+        }
+
+        // ============================================================
+        // Router
+        // ============================================================
+        const PAGES = ['dashboard', 'health', 'upload', 'get-avatar', 'get-active', 'metadata', 'list', 'delete-avatar', 'delete-active'];
+
+        function route() {
+            const hash = (window.location.hash || '#/dashboard').replace('#/', '');
+            const page = PAGES.includes(hash) ? hash : 'dashboard';
+
+            document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+            document.getElementById('page-' + page)?.classList.add('active');
+
+            document.querySelectorAll('.nav-link').forEach(el => {
+                el.classList.toggle('active', el.dataset.page === page);
+            });
+
+            fillIfEmpty('up-userId', state.lastUserId);
+            fillIfEmpty('act-userId', state.lastUserId);
+            fillIfEmpty('list-userId', state.lastUserId);
+            fillIfEmpty('dact-userId', state.lastUserId);
+            fillIfEmpty('del-userId', state.lastUserId);
+            fillIfEmpty('ga-id', state.lastAvatarId);
+            fillIfEmpty('meta-id', state.lastAvatarId);
+            fillIfEmpty('del-id', state.lastAvatarId);
+
+            window.scrollTo(0, 0);
+        }
+
+        function fillIfEmpty(id, value) {
+            const el = document.getElementById(id);
+            if (el && !el.value && value) el.value = value;
+        }
+
+        window.addEventListener('hashchange', route);
+        window.addEventListener('DOMContentLoaded', () => { refreshStateFields(); route(); });
+
+        // ============================================================
+        // API helper
+        // ============================================================
+        async function api(method, path, opts = {}) {
+            const headers = opts.headers || {};
+            const res = await fetch(path, { method, headers, body: opts.body });
+
+            const respHeaders = {};
+            res.headers.forEach((v, k) => { respHeaders[k] = v; });
+
+            const ct = (res.headers.get('Content-Type') || '').toLowerCase();
+            let body, bodyType;
+
+            if (ct.startsWith('image/')) {
+                const blob = await res.blob();
+                body = URL.createObjectURL(blob);
+                bodyType = 'image';
+            } else {
+                const text = await res.text();
+                if (!text) { body = null; bodyType = 'empty'; }
+                else {
+                    try { body = JSON.parse(text); bodyType = 'json'; }
+                    catch { body = text; bodyType = 'text'; }
+                }
+            }
+
+            return { ok: res.ok, status: res.status, statusText: res.statusText, headers: respHeaders, body, bodyType, contentType: ct };
+        }
+
+        // ============================================================
+        // Result renderer
+        // ============================================================
+        function renderResult(prefix, res, opts = {}) {
+            const box = document.getElementById('res-' + prefix);
+            const statusEl = document.getElementById('res-' + prefix + '-status');
+            const bodyEl = document.getElementById('res-' + prefix + '-body');
+            if (!box || !statusEl) return;
+
+            box.classList.remove('hidden');
+            const cls = res.ok
+                ? 'bg-green-500/20 border border-green-500/50 text-green-200'
+                : 'bg-red-500/20 border border-red-500/50 text-red-200';
+            statusEl.className = `text-sm font-mono px-3 py-2 rounded-lg mb-3 ${cls}`;
+            statusEl.textContent = `HTTP ${res.status} ${res.statusText}`;
+
+            if (bodyEl) {
+                if (res.bodyType === 'json') bodyEl.textContent = JSON.stringify(res.body, null, 2);
+                else if (res.bodyType === 'text') bodyEl.textContent = res.body;
+                else if (res.bodyType === 'empty') bodyEl.textContent = '(no body)';
+                else bodyEl.textContent = '(binary data)';
+            }
+
+            if (opts.headersElId) {
+                const h = document.getElementById(opts.headersElId);
+                if (h) h.textContent = Object.entries(res.headers).map(([k, v]) => `${k}: ${v}`).join('\n');
+            }
+            if (opts.imageElId && res.bodyType === 'image') {
+                const wrap = document.getElementById(opts.imageWrapperId);
+                const img = document.getElementById(opts.imageElId);
+                if (wrap && img) { wrap.classList.remove('hidden'); img.src = res.body; }
+            }
+        }
+
+        // ============================================================
+        // Page handlers
+        // ============================================================
+        async function runHealth() {
+            try {
+                const res = await api('GET', '/health');
+                renderResult('health', res);
+            } catch (e) { alert('Network error: ' + e.message); }
+        }
+
+        async function runUpload() {
+            const userId = document.getElementById('up-userId').value.trim();
+            const file = document.getElementById('up-file').files[0];
+            if (!userId) return alert('Please provide a User ID');
+            if (!file) return alert('Please choose a file');
+
+            const fd = new FormData();
+            fd.append('file', file); // field name is "file" per spec
+
+            const btn = document.getElementById('up-btn');
+            btn.disabled = true; btn.textContent = 'Uploading…';
+            try {
+                const res = await api('POST', '/api/v1/avatars', {
+                    headers: { 'X-User-ID': userId },
+                    body: fd,
+                });
+                renderResult('upload', res);
+                if (res.ok && res.body && res.body.id) {
+                    remember(res.body.id, userId);
+                }
+            } catch (e) { alert('Network error: ' + e.message); }
+            finally { btn.disabled = false; btn.textContent = 'Upload'; }
+        }
+
+        async function runGetAvatar() {
+            const id = document.getElementById('ga-id').value.trim();
+            if (!id) return alert('Please provide an Avatar ID');
+
+            const delBtn = document.getElementById('ga-delete-btn');
+            delBtn?.classList.add('hidden');
+
+            try {
+                const res = await api('GET', `/api/v1/avatars/${encodeURIComponent(id)}`);
+                renderResult('get-avatar', res, {
+                    headersElId: 'res-get-avatar-headers',
+                    imageWrapperId: 'res-get-avatar-preview',
+                    imageElId: 'res-get-avatar-img',
+                });
+                if (res.ok) {
+                    remember(id, state.lastUserId);
+                    delBtn?.classList.remove('hidden');
+                }
+            } catch (e) { alert('Network error: ' + e.message); }
+        }
+
+        async function runGetActive() {
+            const userId = document.getElementById('act-userId').value.trim();
+            if (!userId) return alert('Please provide a User ID');
+
+            const delBtn = document.getElementById('act-delete-btn');
+            delBtn?.classList.add('hidden');
+
+            try {
+                const res = await api('GET', `/api/v1/users/${encodeURIComponent(userId)}/avatar`);
+                renderResult('get-active', res, {
+                    headersElId: 'res-get-active-headers',
+                    imageWrapperId: 'res-get-active-preview',
+                    imageElId: 'res-get-active-img',
+                });
+                if (res.ok) {
+                    remember(null, userId);
+                    delBtn?.classList.remove('hidden');
+                }
+            } catch (e) { alert('Network error: ' + e.message); }
+        }
+
+        async function runMetadata() {
+            const id = document.getElementById('meta-id').value.trim();
+            if (!id) return alert('Please provide an Avatar ID');
+            try {
+                const res = await api('GET', `/api/v1/avatars/${encodeURIComponent(id)}/metadata`);
+                renderResult('metadata', res);
+            } catch (e) { alert('Network error: ' + e.message); }
+        }
+
+        async function runList() {
+            const userId = document.getElementById('list-userId').value.trim();
+            if (!userId) return alert('Please provide a User ID');
+            remember(null, userId);
+
+            try {
+                const res = await api('GET', `/api/v1/users/${encodeURIComponent(userId)}/avatars`);
+                renderResult('list', res);
+                renderGallery(userId, res);
+            } catch (e) { alert('Network error: ' + e.message); }
+        }
+
+        function renderGallery(userId, res) {
+            const gallery = document.getElementById('res-list-gallery');
+            gallery.innerHTML = '';
+
+            if (!res.ok || !Array.isArray(res.body)) return;
+
+            if (res.body.length === 0) {
+                gallery.innerHTML = '<p class="col-span-full text-sm text-white/50 text-center py-4">No avatars yet</p>';
+                return;
+            }
+
+            res.body.forEach(av => {
+                const card = document.createElement('div');
+                card.className = 'avatar-card-enter bg-white/5 border border-white/10 rounded-lg overflow-hidden flex flex-col';
+                card.dataset.avatarId = av.id;
+
+                const img = document.createElement('img');
+                img.src = `/api/v1/avatars/${av.id}`;
+                img.className = 'w-full h-32 object-cover';
+                img.loading = 'lazy';
+                img.alt = av.file_name || av.id;
+
+                const meta = document.createElement('div');
+                meta.className = 'p-2 text-xs flex-1';
+                meta.innerHTML = `
+                    <div class="font-mono text-white/60 truncate" title="${av.id}">${av.id.slice(0, 8)}…</div>
+                    <div class="text-white/40 mt-1 truncate">${av.file_name || ''}</div>
+                    <div class="text-white/30 mt-1">${av.processing_status || ''}</div>
+                `;
+
+                const actions = document.createElement('div');
+                actions.className = 'p-2 pt-0 flex gap-2';
+
+                const openBtn = document.createElement('a');
+                openBtn.href = `#/get-avatar`;
+                openBtn.textContent = 'Open';
+                openBtn.className = 'flex-1 text-center text-xs bg-white/10 hover:bg-white/20 px-2 py-1.5 rounded transition';
+                openBtn.addEventListener('click', () => {
+                    document.getElementById('ga-id').value = av.id;
+                    remember(av.id, null);
+                });
+
+                const delBtn = document.createElement('button');
+                delBtn.textContent = 'Delete';
+                delBtn.className = 'flex-1 text-xs bg-red-600/80 hover:bg-red-600 px-2 py-1.5 rounded transition';
+                delBtn.addEventListener('click', () => deleteAvatarInline(av.id, userId, card));
+
+                actions.appendChild(openBtn);
+                actions.appendChild(delBtn);
+
+                card.appendChild(img);
+                card.appendChild(meta);
+                card.appendChild(actions);
+                gallery.appendChild(card);
+            });
+        }
+
+        // Inline deletion from the gallery.
+        async function deleteAvatarInline(avatarId, userId, cardEl) {
+            if (!confirm(`Delete avatar ${avatarId}?`)) return;
+
+            try {
+                const res = await api('DELETE', `/api/v1/avatars/${encodeURIComponent(avatarId)}`, {
+                    headers: { 'X-User-ID': userId },
+                });
+
+                if (res.ok) {
+                    cardEl?.remove();
+                    forget(avatarId);
+                    // If the gallery becomes empty, re-render the message.
+                    const gallery = document.getElementById('res-list-gallery');
+                    if (gallery && gallery.children.length === 0) {
+                        gallery.innerHTML = '<p class="col-span-full text-sm text-white/50 text-center py-4">No avatars yet</p>';
+                    }
+                    // Refresh the raw JSON body so it matches what's on screen.
+                    refreshListJsonBody();
+                } else {
+                    const msg = res.body?.error || res.statusText || 'unknown error';
+                    alert(`Delete failed: HTTP ${res.status} — ${msg}`);
+                }
+            } catch (e) {
+                alert('Network error: ' + e.message);
+            }
+        }
+
+        // Re-fetch the list to keep the JSON preview in sync after inline deletes.
+        async function refreshListJsonBody() {
+            const userId = document.getElementById('list-userId').value.trim();
+            if (!userId) return;
+            try {
+                const res = await api('GET', `/api/v1/users/${encodeURIComponent(userId)}/avatars`);
+                if (res.ok) {
+                    const bodyEl = document.getElementById('res-list-body');
+                    if (bodyEl) bodyEl.textContent = JSON.stringify(res.body, null, 2);
+                }
+            } catch { /* silent — JSON refresh is cosmetic */ }
+        }
+
+        // Delete from the "Get by ID" page — uses the last known user ID.
+        async function quickDeleteAvatar() {
+            const id = document.getElementById('ga-id').value.trim();
+            const userId = state.lastUserId;
+            if (!id) return alert('Please provide an Avatar ID');
+            if (!userId) {
+                // Fall back to asking the user.
+                const prompt_ = window.prompt('X-User-ID (owner):', '');
+                if (!prompt_) return;
+                return doQuickDelete(id, prompt_.trim());
+            }
+            doQuickDelete(id, userId);
+        }
+
+        async function doQuickDelete(avatarId, userId) {
+            if (!confirm(`Delete avatar ${avatarId}?`)) return;
+            try {
+                const res = await api('DELETE', `/api/v1/avatars/${encodeURIComponent(avatarId)}`, {
+                    headers: { 'X-User-ID': userId },
+                });
+                if (res.ok) {
+                    alert('Deleted');
+                    forget(avatarId);
+                    document.getElementById('ga-delete-btn')?.classList.add('hidden');
+                } else {
+                    const msg = res.body?.error || res.statusText;
+                    alert(`Delete failed: HTTP ${res.status} — ${msg}`);
+                }
+            } catch (e) { alert('Network error: ' + e.message); }
+        }
+
+        // Delete from the "Get active" page.
+        async function quickDeleteActive() {
+            const userId = document.getElementById('act-userId').value.trim();
+            if (!userId) return alert('Please provide a User ID');
+            if (!confirm(`Delete the active avatar of ${userId}?`)) return;
+
+            try {
+                const res = await api('DELETE', `/api/v1/users/${encodeURIComponent(userId)}/avatar`, {
+                    headers: { 'X-User-ID': userId },
+                });
+                if (res.ok) {
+                    alert('Deleted');
+                    document.getElementById('act-delete-btn')?.classList.add('hidden');
+                } else {
+                    const msg = res.body?.error || res.statusText;
+                    alert(`Delete failed: HTTP ${res.status} — ${msg}`);
+                }
+            } catch (e) { alert('Network error: ' + e.message); }
+        }
+
+        async function runDelete() {
+            const id = document.getElementById('del-id').value.trim();
+            const userId = document.getElementById('del-userId').value.trim();
+            if (!id) return alert('Please provide an Avatar ID');
+            if (!userId) return alert('Please provide an X-User-ID');
+            if (!confirm(`Delete avatar ${id}? This action cannot be undone.`)) return;
+
+            try {
+                const res = await api('DELETE', `/api/v1/avatars/${encodeURIComponent(id)}`, {
+                    headers: { 'X-User-ID': userId },
+                });
+                renderResult('delete', res);
+                if (res.ok) forget(id);
+            } catch (e) { alert('Network error: ' + e.message); }
+        }
+
+        async function runDeleteActive() {
+            const userId = document.getElementById('dact-userId').value.trim();
+            if (!userId) return alert('Please provide a User ID');
+            if (!confirm(`Delete the active avatar of ${userId}?`)) return;
+
+            try {
+                const res = await api('DELETE', `/api/v1/users/${encodeURIComponent(userId)}/avatar`, {
+                    headers: { 'X-User-ID': userId },
+                });
+                renderResult('delete-active', res);
+            } catch (e) { alert('Network error: ' + e.message); }
+        }
+
+        // Preview the selected file on the Upload page.
+        document.getElementById('up-file')?.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            const wrap = document.getElementById('up-preview');
+            const img = document.getElementById('up-preview-img');
+            if (file && file.type.startsWith('image/')) {
+                img.src = URL.createObjectURL(file);
+                wrap.classList.remove('hidden');
+            } else {
+                wrap.classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+
+</html>

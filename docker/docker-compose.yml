@@ -1,0 +1,150 @@
+name: avatars-service
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-avatars}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-avatars}
+      POSTGRES_DB: ${POSTGRES_DB:-avatars}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minio}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minio12345}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Creates the bucket once minio is up. Idempotent.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-minio} ${S3_SECRET_KEY:-minio12345} &&
+        mc mb --ignore-existing local/${S3_BUCKET:-avatars} &&
+        echo 'bucket ${S3_BUCKET:-avatars} ready'
+      "
+    restart: "no"
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBIT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASSWORD:-guest}
+    ports:
+      - "${RABBIT_PORT:-5672}:5672"
+      - "${RABBIT_MGMT_PORT:-15672}:15672"
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------- application ----------
+
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        DATE: ${DATE:-unknown}
+        COMMIT: ${COMMIT:-unknown}
+    image: avatars-service:dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SERVER_ADDRESS: ":8080"
+      LOGGER_LEVEL: ${LOGGER_LEVEL:-INFO}
+
+      DATABASE_URI: "postgres://${POSTGRES_USER:-avatars}:${POSTGRES_PASSWORD:-avatars}@postgres:5432/${POSTGRES_DB:-avatars}?sslmode=disable"
+      MIGRATIONS: "/app/migrations"
+
+      S3_ENDPOINT: "minio:9000"
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minio}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minio12345}
+      S3_BUCKET: ${S3_BUCKET:-avatars}
+      S3_USE_SSL: "false"
+
+      RABBIT_URL: "amqp://${RABBIT_USER:-guest}:${RABBIT_PASSWORD:-guest}@rabbitmq:5672/"
+      RABBIT_EXCHANGE: "avatars.exchange"
+      RABBIT_UPLOAD_KEY: "avatar.uploaded"
+      RABBIT_DELETE_KEY: "avatar.deleted"
+
+      MAX_FILE_SIZE: "10485760"
+      ALLOWED_MIME_TYPES: "image/jpeg,image/png,image/webp"
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  worker:
+    image: avatars-service:dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    entrypoint: ["/app/worker"]
+    environment:
+      LOGGER_LEVEL: ${LOGGER_LEVEL:-INFO}
+
+      DATABASE_URI: "postgres://${POSTGRES_USER:-avatars}:${POSTGRES_PASSWORD:-avatars}@postgres:5432/${POSTGRES_DB:-avatars}?sslmode=disable"
+      MIGRATIONS: "/app/migrations"
+
+      S3_ENDPOINT: "minio:9000"
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minio}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minio12345}
+      S3_BUCKET: ${S3_BUCKET:-avatars}
+      S3_USE_SSL: "false"
+
+      RABBIT_URL: "amqp://${RABBIT_USER:-guest}:${RABBIT_PASSWORD:-guest}@rabbitmq:5672/"
+      RABBIT_EXCHANGE: "avatars.exchange"
+      RABBIT_UPLOAD_KEY: "avatar.uploaded"
+      RABBIT_DELETE_KEY: "avatar.deleted"
+
+volumes:
+  pgdata:
+  miniodata:
+  rabbitdata:
