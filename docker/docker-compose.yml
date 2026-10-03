@@ -37,7 +37,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # Creates the bucket once minio is up. Idempotent.
   minio-init:
     image: minio/mc:latest
     depends_on:
@@ -87,6 +86,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     environment:
       SERVER_ADDRESS: ":8080"
       LOGGER_LEVEL: ${LOGGER_LEVEL:-INFO}
@@ -107,6 +108,10 @@ services:
 
       MAX_FILE_SIZE: "10485760"
       ALLOWED_MIME_TYPES: "image/jpeg,image/png,image/webp"
+
+      OTEL_EXPORTER_OTLP_ENDPOINT: "jaeger:4318"
+      OTEL_SERVICE_NAME: "avatars-server"
+      OTEL_SAMPLE_RATIO: "1.0"
     ports:
       - "${SERVER_PORT:-8080}:8080"
     healthcheck:
@@ -115,6 +120,14 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+    logging:         
+      driver: fluentd
+      options:
+        fluentd-address: "host.docker.internal:24224"
+        fluentd-async: "true"
+        fluentd-retry-wait: "1s"
+        fluentd-max-retries: "30"
+        tag: "avatars.server"
 
   worker:
     image: avatars-service:dev
@@ -143,8 +156,129 @@ services:
       RABBIT_EXCHANGE: "avatars.exchange"
       RABBIT_UPLOAD_KEY: "avatar.uploaded"
       RABBIT_DELETE_KEY: "avatar.deleted"
+    expose:
+      - "9091"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9091/metrics"]
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: "host.docker.internal:24224"
+        fluentd-async: "true"
+        fluentd-retry-wait: "1s"
+        fluentd-max-retries: "30"
+        tag: "avatars.worker"
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+      - "${JAEGER_OTLP_HTTP_PORT:-4318}:4318"
+      - "${JAEGER_OTLP_GRPC_PORT:-4317}:4317"
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+    ports: ["9090:9090"]
+    depends_on:
+      alertmanager:
+        condition: service_started
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3000:3000"]
+  
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9093/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # ---------- logging (ELK / OpenSearch) ----------
+
+  opensearch:
+    image: opensearchproject/opensearch:2.18.0
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      # Dev-only: disables TLS and the security plugin. Never do this in prod.
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    ports:
+      - "${OPENSEARCH_PORT:-9200}:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health?wait_for_status=yellow || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.18.0
+    restart: unless-stopped
+    environment:
+      - 'OPENSEARCH_HOSTS=["http://opensearch:9200"]'
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - "${OPENSEARCH_DASHBOARDS_PORT:-5601}:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+  fluent-bit:
+    image: fluent/fluent-bit:3.2
+    restart: unless-stopped
+    volumes:
+      - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+    ports:
+      - "${FLUENT_BIT_PORT:-24224}:24224"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2020/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
 volumes:
   pgdata:
   miniodata:
   rabbitdata:
+  opensearch-data:

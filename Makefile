@@ -8,9 +8,9 @@ export VERSION
 export DATE
 export COMMIT
 
-server:  # build and run binary
-	docker compose -f ./docker/docker-compose.yml up -d --build
-	docker compose -f ./docker/docker-compose.yml logs -f server worker
+server:  # build and run
+	docker compose -f ./docker/docker-compose.yml up -d
+	docker compose -f ./docker/docker-compose.yml up --build server worker
 
 # ========== GENERATE ==========
 

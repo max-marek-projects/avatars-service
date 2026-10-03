@@ -3,8 +3,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,9 +15,12 @@ import (
 	"github.com/max-marek-projects/avatars-service/internal/broker"
 	"github.com/max-marek-projects/avatars-service/internal/config"
 	"github.com/max-marek-projects/avatars-service/internal/logger"
+	"github.com/max-marek-projects/avatars-service/internal/metrics"
 	"github.com/max-marek-projects/avatars-service/internal/repository"
 	"github.com/max-marek-projects/avatars-service/internal/storage"
+	"github.com/max-marek-projects/avatars-service/internal/tracing"
 	"github.com/max-marek-projects/avatars-service/internal/worker"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
@@ -38,8 +43,46 @@ func run() error {
 		return fmt.Errorf("init logger: %w", err)
 	}
 
+	// Metrics
+	metrics.Register()
+	metricsSrv := &http.Server{
+		Addr:              ":9091",
+		Handler:           promhttp.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("metrics server stopped", slog.Any("error", err))
+		}
+	}()
+	defer func() {
+		shCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = metricsSrv.Shutdown(shCtx)
+	}()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// observability
+	shutdownTracing, err := tracing.Init(ctx, tracing.Config{
+		Endpoint:       cfg.OTLPEndpoint,
+		ServiceName:    cfg.OTELServiceName,
+		ServiceVersion: buildVersion,
+		SampleRatio:    cfg.OTELSampleRatio,
+		Insecure:       true,
+	})
+	if err != nil {
+		log.Error("unable to init tracing", slog.Any("error", err))
+		return err
+	}
+	defer func() {
+		shCtx, cancelSh := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelSh()
+		if err := shutdownTracing(shCtx); err != nil {
+			log.Warn("tracing shutdown failed", slog.Any("error", err))
+		}
+	}()
 
 	// Storage: PostgreSQL.
 	store, err := repository.NewDBStorage(ctx, cfg.DatabaseURI, cfg.ForceMigrations, log)

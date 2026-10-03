@@ -1,0 +1,29 @@
+# Alertmanager routes firing alerts from Prometheus to receivers.
+
+global:
+  resolve_timeout: 1m
+
+route:
+  receiver: "default"
+  group_by: ["alertname", "severity"]
+  group_wait: 5s
+  group_interval: 30s
+  repeat_interval: 1h
+
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: "default"
+      repeat_interval: 15m
+
+receivers:
+  - name: "default"
+
+# Suppress noisy alerts that are covered by another one.
+inhibit_rules:
+  # If the service is completely down, don't also complain about latency/errors.
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ["alertname"]

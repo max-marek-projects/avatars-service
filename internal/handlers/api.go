@@ -32,7 +32,7 @@ func (h *Handler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 	// Enforce the hard cap before touching the body.
 	r.Body = http.MaxBytesReader(w, r.Body, h.maxUploadSize)
 	if err := r.ParseMultipartForm(h.maxUploadSize); err != nil {
-		h.logger.Warn("handler: multipart parse failed", slog.Any("error", err))
+		h.logger.WarnContext(r.Context(), "handler: multipart parse failed", slog.Any("error", err))
 		writeError(w, http.StatusRequestEntityTooLarge, "file too large")
 		return
 	}
@@ -86,7 +86,7 @@ func (h *Handler) GetAvatarByID(w http.ResponseWriter, r *http.Request) {
 
 	setImageHeaders(w, avatar)
 	if _, err := io.Copy(w, rc); err != nil {
-		h.logger.Error("handler: stream avatar failed", slog.Any("error", err))
+		h.logger.ErrorContext(r.Context(), "handler: stream avatar failed", slog.Any("error", err))
 	}
 }
 
@@ -107,7 +107,7 @@ func (h *Handler) GetActiveAvatar(w http.ResponseWriter, r *http.Request) {
 
 	setImageHeaders(w, avatar)
 	if _, err := io.Copy(w, rc); err != nil {
-		h.logger.Error("handler: stream avatar failed", slog.Any("error", err))
+		h.logger.ErrorContext(r.Context(), "handler: stream avatar failed", slog.Any("error", err))
 	}
 }
 

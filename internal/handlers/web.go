@@ -41,7 +41,7 @@ var galleryTmpl = template.Must(template.New("gallery").Parse(`<!doctype html>
 func (h *Handler) WebUploadForm(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := uploadTmpl.Execute(w, nil); err != nil {
-		h.logger.Error("handler: render upload form failed", "error", err)
+		h.logger.ErrorContext(r.Context(), "handler: render upload form failed", "error", err)
 	}
 }
 
@@ -90,7 +90,7 @@ func (h *Handler) WebGallery(w http.ResponseWriter, r *http.Request) {
 		"UserID":  userID,
 		"Avatars": avatars,
 	}); err != nil {
-		h.logger.Error("handler: render gallery failed", "error", err)
+		h.logger.ErrorContext(r.Context(), "handler: render gallery failed", "error", err)
 	}
 }
 

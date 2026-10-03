@@ -14,10 +14,12 @@ import (
 	"github.com/max-marek-projects/avatars-service/internal/config"
 	"github.com/max-marek-projects/avatars-service/internal/handlers"
 	"github.com/max-marek-projects/avatars-service/internal/logger"
+	"github.com/max-marek-projects/avatars-service/internal/metrics"
 	"github.com/max-marek-projects/avatars-service/internal/repository"
 	"github.com/max-marek-projects/avatars-service/internal/server"
 	"github.com/max-marek-projects/avatars-service/internal/services"
 	"github.com/max-marek-projects/avatars-service/internal/storage"
+	"github.com/max-marek-projects/avatars-service/internal/tracing"
 )
 
 var (
@@ -45,6 +47,26 @@ func run() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// observability
+	shutdownTracing, err := tracing.Init(ctx, tracing.Config{
+		Endpoint:       cfg.OTLPEndpoint,
+		ServiceName:    cfg.OTELServiceName,
+		ServiceVersion: buildVersion,
+		SampleRatio:    cfg.OTELSampleRatio,
+		Insecure:       true,
+	})
+	if err != nil {
+		log.Error("unable to init tracing", slog.Any("error", err))
+		return err
+	}
+	defer func() {
+		shCtx, cancelSh := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelSh()
+		if err := shutdownTracing(shCtx); err != nil {
+			log.Warn("tracing shutdown failed", slog.Any("error", err))
+		}
+	}()
 
 	// 1. PostgreSQL.
 	store, err := repository.NewDBStorage(ctx, cfg.DatabaseURI, cfg.ForceMigrations, log)
@@ -88,6 +110,9 @@ func run() error {
 			log.Warn("failed to close RabbitMQ", slog.Any("error", cancelErr))
 		}
 	}()
+
+	// Metrics
+	metrics.Register()
 
 	// 4. Business-logic service.
 	svc, err := services.NewService(store, s3, pub, services.Config{

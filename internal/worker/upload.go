@@ -10,9 +10,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
+	"github.com/max-marek-projects/avatars-service/internal/metrics"
 	"github.com/max-marek-projects/avatars-service/internal/models"
 	"github.com/max-marek-projects/avatars-service/internal/repository"
+	"github.com/max-marek-projects/avatars-service/internal/tracing"
 )
 
 // handleUploadWithRetry runs handleUpload up to MaxRetries times with
@@ -30,12 +34,12 @@ func (w *Worker) handleUploadWithRetry(ctx context.Context, ev models.AvatarUplo
 		lastErr = err
 
 		if errors.Is(err, repository.ErrAvatarNotFound) {
-			w.logger.Warn("worker: avatar gone, dropping event",
+			w.logger.WarnContext(ctx, "worker: avatar gone, dropping event",
 				slog.String("avatar_id", ev.AvatarID))
 			return nil
 		}
 
-		w.logger.Warn("worker: upload processing attempt failed",
+		w.logger.WarnContext(ctx, "worker: upload processing attempt failed",
 			slog.String("avatar_id", ev.AvatarID),
 			slog.Int("attempt", attempt),
 			slog.Duration("next_delay", delay),
@@ -52,7 +56,7 @@ func (w *Worker) handleUploadWithRetry(ctx context.Context, ev models.AvatarUplo
 	avatarID, parseErr := uuid.Parse(ev.AvatarID)
 	if parseErr == nil {
 		if updErr := w.storage.UpdateProcessingStatus(ctx, avatarID, models.ProcessingStatusFailed, nil); updErr != nil {
-			w.logger.Error("worker: failed to mark processing_status=failed",
+			w.logger.ErrorContext(ctx, "worker: failed to mark processing_status=failed",
 				slog.String("avatar_id", ev.AvatarID),
 				slog.Any("error", updErr))
 		}
@@ -68,62 +72,97 @@ func (w *Worker) handleUploadWithRetry(ctx context.Context, ev models.AvatarUplo
 //  4. Upload thumbnails to S3.
 //  5. Persist thumbnail keys and set processing_status=completed.
 func (w *Worker) handleUpload(ctx context.Context, ev models.AvatarUploadEvent) error {
+	ctx, span := tracer.Start(ctx, "Worker.handleUpload",
+		trace.WithAttributes(
+			attribute.String("avatar.id", ev.AvatarID),
+			attribute.String("user.id", ev.UserID),
+			attribute.String("s3.key", ev.S3Key),
+		),
+	)
+	defer span.End()
+
+	// Observe per-attempt latency. handleUploadWithRetry calls this in a loop,
+	// so retried events produce one sample per attempt — useful for spotting
+	// "slow first try, fast retry" patterns caused by transient S3/DB hiccups.
+	start := time.Now()
+	defer func() {
+		metrics.AvatarProcessingDuration.WithLabelValues("upload").
+			Observe(time.Since(start).Seconds())
+	}()
+
 	if ev.AvatarID == "" || ev.S3Key == "" {
-		return fmt.Errorf("worker: empty upload event")
+		err := fmt.Errorf("worker: empty upload event")
+		tracing.RecordError(span, err)
+		return err
 	}
 	id, err := uuid.Parse(ev.AvatarID)
 	if err != nil {
-		return fmt.Errorf("worker: invalid avatar id %q: %w", ev.AvatarID, err)
+		err = fmt.Errorf("worker: invalid avatar id %q: %w", ev.AvatarID, err)
+		tracing.RecordError(span, err)
+		return err
 	}
 
 	avatar, err := w.storage.GetAvatarByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrAvatarNotFound) {
-			return repository.ErrAvatarNotFound // signals "drop this event"
+			// Domain error — normal business outcome, do not pollute error-rate.
+			return repository.ErrAvatarNotFound
 		}
+		tracing.RecordError(span, err)
 		return fmt.Errorf("worker: get avatar: %w", err)
 	}
 	if avatar.ProcessingStatus == models.ProcessingStatusCompleted {
-		w.logger.Info("worker: upload already completed, skipping",
+		w.logger.InfoContext(ctx, "worker: upload already completed, skipping",
 			slog.String("avatar_id", ev.AvatarID))
 		return nil
 	}
 
 	if err := w.storage.UpdateProcessingStatus(ctx, id, models.ProcessingStatusProcessing, nil); err != nil {
-		w.logger.Warn("worker: could not mark processing",
+		w.logger.WarnContext(ctx, "worker: could not mark processing",
 			slog.String("avatar_id", ev.AvatarID), slog.Any("error", err))
 	}
 
 	src, err := w.objects.Download(ctx, ev.S3Key)
 	if err != nil {
-		return fmt.Errorf("download original: %w", err)
+		err = fmt.Errorf("download original: %w", err)
+		tracing.RecordError(span, err)
+		return err
 	}
 	defer src.Close()
 
 	raw, err := io.ReadAll(src)
 	if err != nil {
-		return fmt.Errorf("read original: %w", err)
+		err = fmt.Errorf("read original: %w", err)
+		tracing.RecordError(span, err)
+		return err
 	}
 
 	thumbs := make(map[string]string, len(w.cfg.ThumbnailSizes))
 	for _, size := range w.cfg.ThumbnailSizes {
 		data, err := Resize(bytes.NewReader(raw), size)
 		if err != nil {
-			return fmt.Errorf("resize %dx%d: %w", size, size, err)
+			err = fmt.Errorf("resize %dx%d: %w", size, size, err)
+			tracing.RecordError(span, err)
+			return err
 		}
 		key := fmt.Sprintf("thumbnails/%s/%dx%d.jpg", ev.AvatarID, size, size)
 
 		if err := w.objects.Upload(ctx, key, bytes.NewReader(data), int64(len(data)), "image/jpeg"); err != nil {
-			return fmt.Errorf("upload thumbnail %s: %w", key, err)
+			err = fmt.Errorf("upload thumbnail %s: %w", key, err)
+			tracing.RecordError(span, err)
+			return err
 		}
 		thumbs[fmt.Sprintf("%dx%d", size, size)] = key
 	}
 
 	if err := w.storage.UpdateProcessingStatus(ctx, id, models.ProcessingStatusCompleted, thumbs); err != nil {
-		return fmt.Errorf("update processing status: %w", err)
+		err = fmt.Errorf("update processing status: %w", err)
+		tracing.RecordError(span, err)
+		return err
 	}
 
-	w.logger.Info("worker: upload processed",
+	span.SetAttributes(attribute.Int("thumbnails.count", len(thumbs)))
+	w.logger.InfoContext(ctx, "worker: upload processed",
 		slog.String("avatar_id", ev.AvatarID),
 		slog.Int("thumbnails", len(thumbs)))
 	return nil
