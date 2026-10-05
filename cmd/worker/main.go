@@ -70,7 +70,7 @@ func run() error {
 		ServiceName:    cfg.OTELServiceName,
 		ServiceVersion: buildVersion,
 		SampleRatio:    cfg.OTELSampleRatio,
-		Insecure:       true,
+		Insecure:       cfg.OTELInsecure,
 	})
 	if err != nil {
 		log.Error("unable to init tracing", slog.Any("error", err))

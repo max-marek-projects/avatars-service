@@ -100,6 +100,11 @@ type Config struct {
 	// Empty disables tracing.
 	OTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" json:"otlp_endpoint"`
 
+	// OTELInsecure disables TLS on the OTLP connection. Must be true for local
+	// collectors (Jaeger, otel-collector) and false when the collector terminates
+	// TLS itself (managed backends, cloud deployments).
+	OTELInsecure bool `env:"OTEL_INSECURE" json:"otel_insecure"`
+
 	// OTELServiceName is reported as the service.name resource attribute.
 	OTELServiceName string `env:"OTEL_SERVICE_NAME" json:"otel_service_name"`
 
@@ -135,6 +140,7 @@ func LoadConfig() (config *Config, err error) {
 		StaticDir:        "./web/static",
 		OTELServiceName:  "avatars-service",
 		OTELSampleRatio:  1.0,
+		OTELInsecure:     true,
 	}
 
 	// Parse .env file.
@@ -212,6 +218,7 @@ func LoadConfig() (config *Config, err error) {
 
 	// observability.
 	fs.StringVar(&config.OTLPEndpoint, "otlp-endpoint", config.OTLPEndpoint, "OTLP HTTP endpoint host:port")
+	fs.BoolVar(&config.OTELInsecure, "otel-insecure", config.OTELInsecure, "disable TLS on the OTLP connection")
 	fs.StringVar(&config.OTELServiceName, "otel-service-name", config.OTELServiceName, "OTel service.name")
 	fs.Float64Var(&config.OTELSampleRatio, "otel-sample-ratio", config.OTELSampleRatio, "trace sample ratio (0..1]")
 
