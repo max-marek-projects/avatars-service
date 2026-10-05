@@ -60,11 +60,11 @@ func TestService_UploadAvatar(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		s, st, obj, pub := newTestService(t, Config{})
 
-		obj.On("Upload", ctx, mock.AnythingOfType("string"), body, size, mime).Return(nil)
-		st.On("CreateAvatar", ctx, mock.MatchedBy(func(a *models.Avatar) bool {
+		obj.EXPECT().Upload(mock.Anything, mock.AnythingOfType("string"), body, size, mime).Return(nil)
+		st.EXPECT().CreateAvatar(mock.Anything, mock.MatchedBy(func(a *models.Avatar) bool {
 			return a.UserID == userID && a.S3Key != "" && a.ProcessingStatus == models.ProcessingStatusPending
 		})).Return(nil)
-		pub.On("PublishUpload", ctx, mock.AnythingOfType("models.AvatarUploadEvent")).Return(nil)
+		pub.EXPECT().PublishUpload(mock.Anything, mock.AnythingOfType("models.AvatarUploadEvent")).Return(nil)
 
 		av, err := s.UploadAvatar(ctx, userID, body, file, mime, size)
 		require.NoError(t, err)
@@ -101,7 +101,7 @@ func TestService_UploadAvatar(t *testing.T) {
 
 	t.Run("s3 upload error", func(t *testing.T) {
 		s, _, obj, _ := newTestService(t, Config{})
-		obj.On("Upload", ctx, mock.Anything, body, size, mime).Return(errors.New("s3 down"))
+		obj.EXPECT().Upload(mock.Anything, mock.Anything, body, size, mime).Return(errors.New("s3 down"))
 		_, err := s.UploadAvatar(ctx, userID, body, file, mime, size)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "upload file to S3")
@@ -109,25 +109,23 @@ func TestService_UploadAvatar(t *testing.T) {
 
 	t.Run("db error rolls back s3", func(t *testing.T) {
 		s, st, obj, _ := newTestService(t, Config{})
-		obj.On("Upload", ctx, mock.Anything, body, size, mime).Return(nil)
-		st.On("CreateAvatar", ctx, mock.Anything).Return(repository.ErrAlreadyInStorage)
-		obj.On("Delete", ctx, mock.AnythingOfType("string")).Return(nil)
+		obj.EXPECT().Upload(mock.Anything, mock.Anything, body, size, mime).Return(nil)
+		st.EXPECT().CreateAvatar(mock.Anything, mock.Anything).Return(repository.ErrAlreadyInStorage)
+		obj.EXPECT().Delete(mock.Anything, mock.AnythingOfType("string")).Return(nil)
 
 		_, err := s.UploadAvatar(ctx, userID, body, file, mime, size)
 		assert.ErrorIs(t, err, ErrAvatarConflict)
-		obj.AssertCalled(t, "Delete", ctx, mock.AnythingOfType("string"))
 	})
 
 	t.Run("publish error marks upload failed", func(t *testing.T) {
 		s, st, obj, pub := newTestService(t, Config{})
-		obj.On("Upload", ctx, mock.Anything, body, size, mime).Return(nil)
-		st.On("CreateAvatar", ctx, mock.Anything).Return(nil)
-		pub.On("PublishUpload", ctx, mock.Anything).Return(errors.New("broker down"))
-		st.On("UpdateUploadStatus", ctx, mock.Anything, models.UploadStatusFailed).Return(nil)
+		obj.EXPECT().Upload(mock.Anything, mock.Anything, body, size, mime).Return(nil)
+		st.EXPECT().CreateAvatar(mock.Anything, mock.Anything).Return(nil)
+		pub.EXPECT().PublishUpload(mock.Anything, mock.Anything).Return(errors.New("broker down"))
+		st.EXPECT().UpdateUploadStatus(mock.Anything, mock.Anything, models.UploadStatusFailed).Return(nil)
 
 		_, err := s.UploadAvatar(ctx, userID, body, file, mime, size)
 		assert.Error(t, err)
-		st.AssertCalled(t, "UpdateUploadStatus", ctx, mock.Anything, models.UploadStatusFailed)
 	})
 }
 
@@ -139,8 +137,8 @@ func TestService_GetAvatarByID(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		s, st, obj, _ := newTestService(t, Config{})
 		av := &models.Avatar{ID: id, S3Key: "k"}
-		st.On("GetAvatarByID", ctx, id).Return(av, nil)
-		obj.On("Download", ctx, "k").Return(rc, nil)
+		st.EXPECT().GetAvatarByID(mock.Anything, id).Return(av, nil)
+		obj.EXPECT().Download(mock.Anything, "k").Return(rc, nil)
 
 		got, gotRC, err := s.GetAvatarByID(ctx, id)
 		require.NoError(t, err)
@@ -150,7 +148,7 @@ func TestService_GetAvatarByID(t *testing.T) {
 
 	t.Run("not found", func(t *testing.T) {
 		s, st, _, _ := newTestService(t, Config{})
-		st.On("GetAvatarByID", ctx, id).Return(nil, repository.ErrAvatarNotFound)
+		st.EXPECT().GetAvatarByID(mock.Anything, id).Return(nil, repository.ErrAvatarNotFound)
 		_, _, err := s.GetAvatarByID(ctx, id)
 		assert.ErrorIs(t, err, ErrAvatarNotFound)
 	})
@@ -167,8 +165,8 @@ func TestService_GetActiveAvatar_Placeholder(t *testing.T) {
 	rc := io.NopCloser(strings.NewReader("ph"))
 
 	s, st, obj, _ := newTestService(t, Config{DefaultAvatarKey: "defaults/placeholder.png"})
-	st.On("GetActiveAvatarByUserID", ctx, "u1").Return(nil, repository.ErrAvatarNotFound)
-	obj.On("Download", ctx, "defaults/placeholder.png").Return(rc, nil)
+	st.EXPECT().GetActiveAvatarByUserID(mock.Anything, "u1").Return(nil, repository.ErrAvatarNotFound)
+	obj.EXPECT().Download(mock.Anything, "defaults/placeholder.png").Return(rc, nil)
 
 	av, gotRC, err := s.GetActiveAvatar(ctx, "u1")
 	require.NoError(t, err)
@@ -179,7 +177,7 @@ func TestService_GetActiveAvatar_Placeholder(t *testing.T) {
 func TestService_GetActiveAvatar_NotFoundWithoutDefault(t *testing.T) {
 	ctx := context.Background()
 	s, st, _, _ := newTestService(t, Config{})
-	st.On("GetActiveAvatarByUserID", ctx, "u1").Return(nil, repository.ErrAvatarNotFound)
+	st.EXPECT().GetActiveAvatarByUserID(mock.Anything, "u1").Return(nil, repository.ErrAvatarNotFound)
 
 	_, _, err := s.GetActiveAvatar(ctx, "u1")
 	assert.ErrorIs(t, err, ErrAvatarNotFound)
@@ -197,9 +195,9 @@ func TestService_DeleteAvatar(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		s, st, _, pub := newTestService(t, Config{})
-		st.On("GetAvatarByID", ctx, id).Return(av, nil)
-		st.On("SoftDeleteAvatar", ctx, id, "u1").Return(nil)
-		pub.On("PublishDelete", ctx, mock.MatchedBy(func(e models.AvatarDeleteEvent) bool {
+		st.EXPECT().GetAvatarByID(mock.Anything, id).Return(av, nil)
+		st.EXPECT().SoftDeleteAvatar(mock.Anything, id, "u1").Return(nil)
+		pub.EXPECT().PublishDelete(mock.Anything, mock.MatchedBy(func(e models.AvatarDeleteEvent) bool {
 			return e.AvatarID == id.String() && len(e.S3Keys) == 3
 		})).Return(nil)
 
@@ -210,23 +208,23 @@ func TestService_DeleteAvatar(t *testing.T) {
 
 	t.Run("forbidden", func(t *testing.T) {
 		s, st, _, _ := newTestService(t, Config{})
-		st.On("GetAvatarByID", ctx, id).Return(av, nil)
+		st.EXPECT().GetAvatarByID(mock.Anything, id).Return(av, nil)
 		err := s.DeleteAvatar(ctx, id, "other")
 		assert.ErrorIs(t, err, ErrForbidden)
 	})
 
 	t.Run("not found", func(t *testing.T) {
 		s, st, _, _ := newTestService(t, Config{})
-		st.On("GetAvatarByID", ctx, id).Return(nil, repository.ErrAvatarNotFound)
+		st.EXPECT().GetAvatarByID(mock.Anything, id).Return(nil, repository.ErrAvatarNotFound)
 		err := s.DeleteAvatar(ctx, id, "u1")
 		assert.ErrorIs(t, err, ErrAvatarNotFound)
 	})
 
 	t.Run("publish error does not fail delete", func(t *testing.T) {
 		s, st, _, pub := newTestService(t, Config{})
-		st.On("GetAvatarByID", ctx, id).Return(av, nil)
-		st.On("SoftDeleteAvatar", ctx, id, "u1").Return(nil)
-		pub.On("PublishDelete", ctx, mock.Anything).Return(errors.New("broker down"))
+		st.EXPECT().GetAvatarByID(mock.Anything, id).Return(av, nil)
+		st.EXPECT().SoftDeleteAvatar(mock.Anything, id, "u1").Return(nil)
+		pub.EXPECT().PublishDelete(mock.Anything, mock.Anything).Return(errors.New("broker down"))
 
 		err := s.DeleteAvatar(ctx, id, "u1")
 		assert.NoError(t, err) // soft-delete already happened
@@ -237,7 +235,7 @@ func TestService_ListUserAvatars(t *testing.T) {
 	ctx := context.Background()
 	s, st, _, _ := newTestService(t, Config{})
 	expected := []models.Avatar{{ID: uuid.New(), UserID: "u1"}}
-	st.On("ListAvatarsByUserID", ctx, "u1").Return(expected, nil)
+	st.EXPECT().ListAvatarsByUserID(mock.Anything, "u1").Return(expected, nil)
 
 	got, err := s.ListUserAvatars(ctx, "u1")
 	require.NoError(t, err)
@@ -252,9 +250,9 @@ func TestService_Health(t *testing.T) {
 
 	t.Run("all ok", func(t *testing.T) {
 		s, st, obj, pub := newTestService(t, Config{})
-		st.On("Ping", ctx).Return(nil)
-		obj.On("Ping", ctx).Return(nil)
-		pub.On("Ping", ctx).Return(nil)
+		st.EXPECT().Ping(mock.Anything).Return(nil)
+		obj.EXPECT().Ping(mock.Anything).Return(nil)
+		pub.EXPECT().Ping(mock.Anything).Return(nil)
 
 		h := s.Health(ctx)
 		assert.Equal(t, "ok", h.Status)
@@ -265,9 +263,9 @@ func TestService_Health(t *testing.T) {
 
 	t.Run("degraded", func(t *testing.T) {
 		s, st, obj, pub := newTestService(t, Config{})
-		st.On("Ping", ctx).Return(errors.New("db down"))
-		obj.On("Ping", ctx).Return(nil)
-		pub.On("Ping", ctx).Return(nil)
+		st.EXPECT().Ping(mock.Anything).Return(errors.New("db down"))
+		obj.EXPECT().Ping(mock.Anything).Return(nil)
+		pub.EXPECT().Ping(mock.Anything).Return(nil)
 
 		h := s.Health(ctx)
 		assert.Equal(t, "degraded", h.Status)
@@ -278,7 +276,7 @@ func TestService_Health(t *testing.T) {
 func TestService_Close(t *testing.T) {
 	ctx := context.Background()
 	s, st, _, _ := newTestService(t, Config{})
-	st.On("Close", ctx).Return(nil)
+	st.EXPECT().Close(mock.Anything).Return(nil)
 	require.NoError(t, s.Close(ctx))
 	st.AssertExpectations(t)
 }

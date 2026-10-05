@@ -82,7 +82,7 @@ func TestNewServer(t *testing.T) {
 
 func TestServer_ListenAndServe_Shutdown(t *testing.T) {
 	svc := NewMockService(t)
-	svc.On("Close", mock.Anything).Return(nil)
+	svc.EXPECT().Close(mock.Anything).Return(nil)
 	h := handlers.NewHandler(svc, nil, maxUploadFileSize)
 
 	srv, err := NewServer("127.0.0.1:0", h, time.Second, time.Second, "", nil)
@@ -119,7 +119,7 @@ func TestRouter_UploadAvatar(t *testing.T) {
 			SizeBytes:        4,
 			ProcessingStatus: models.ProcessingStatusPending,
 		}
-		svc.On("UploadAvatar", mock.Anything, testUserID, mock.Anything, "a.png", "image/png", int64(4)).
+		svc.EXPECT().UploadAvatar(mock.Anything, testUserID, mock.Anything, "a.png", "image/png", int64(4)).
 			Return(av, nil)
 
 		ts := newTestServer(t, svc)
@@ -157,7 +157,7 @@ func TestRouter_GetAvatarByID(t *testing.T) {
 		svc := NewMockService(t)
 		id := uuid.New()
 		av := &models.Avatar{ID: id, MimeType: "image/png", FileName: "a.png"}
-		svc.On("GetAvatarByID", mock.Anything, id).
+		svc.EXPECT().GetAvatarByID(mock.Anything, id).
 			Return(av, io.NopCloser(strings.NewReader("PNGDATA")), nil)
 
 		ts := newTestServer(t, svc)
@@ -174,7 +174,7 @@ func TestRouter_GetAvatarByID(t *testing.T) {
 	t.Run("404", func(t *testing.T) {
 		svc := NewMockService(t)
 		id := uuid.New()
-		svc.On("GetAvatarByID", mock.Anything, id).
+		svc.EXPECT().GetAvatarByID(mock.Anything, id).
 			Return(nil, nil, services.ErrAvatarNotFound)
 
 		ts := newTestServer(t, svc)
@@ -189,7 +189,7 @@ func TestRouter_DeleteAvatar(t *testing.T) {
 	t.Run("204", func(t *testing.T) {
 		svc := NewMockService(t)
 		id := uuid.New()
-		svc.On("DeleteAvatar", mock.Anything, id, testUserID).Return(nil)
+		svc.EXPECT().DeleteAvatar(mock.Anything, id, testUserID).Return(nil)
 
 		ts := newTestServer(t, svc)
 		req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/avatars/"+id.String(), nil)
@@ -203,7 +203,7 @@ func TestRouter_DeleteAvatar(t *testing.T) {
 	t.Run("403", func(t *testing.T) {
 		svc := NewMockService(t)
 		id := uuid.New()
-		svc.On("DeleteAvatar", mock.Anything, id, testUserID).Return(services.ErrForbidden)
+		svc.EXPECT().DeleteAvatar(mock.Anything, id, testUserID).Return(services.ErrForbidden)
 
 		ts := newTestServer(t, svc)
 		req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/avatars/"+id.String(), nil)
@@ -218,7 +218,7 @@ func TestRouter_DeleteAvatar(t *testing.T) {
 func TestRouter_Health(t *testing.T) {
 	t.Run("200 ok", func(t *testing.T) {
 		svc := NewMockService(t)
-		svc.On("Health", mock.Anything).Return(models.HealthStatus{
+		svc.EXPECT().Health(mock.Anything).Return(models.HealthStatus{
 			Status: "ok",
 			Details: map[string]models.ComponentHealth{
 				"database": {Status: "ok"},
@@ -235,7 +235,7 @@ func TestRouter_Health(t *testing.T) {
 
 	t.Run("503 degraded", func(t *testing.T) {
 		svc := NewMockService(t)
-		svc.On("Health", mock.Anything).Return(models.HealthStatus{
+		svc.EXPECT().Health(mock.Anything).Return(models.HealthStatus{
 			Status: "degraded",
 			Details: map[string]models.ComponentHealth{
 				"database": {Status: "unavailable", Error: "down"},

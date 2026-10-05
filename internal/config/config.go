@@ -93,6 +93,23 @@ type Config struct {
 	// StaticDir is the filesystem path to the directory with SPA assets
 	// (index.html and friends). Empty disables static serving.
 	StaticDir string `env:"STATIC_DIR" json:"static_dir"`
+
+	// ---------- Observability ----------
+
+	// OTLPEndpoint is the OTLP HTTP endpoint (host:port) of the collector.
+	// Empty disables tracing.
+	OTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" json:"otlp_endpoint"`
+
+	// OTELInsecure disables TLS on the OTLP connection. Must be true for local
+	// collectors (Jaeger, otel-collector) and false when the collector terminates
+	// TLS itself (managed backends, cloud deployments).
+	OTELInsecure bool `env:"OTEL_INSECURE" json:"otel_insecure"`
+
+	// OTELServiceName is reported as the service.name resource attribute.
+	OTELServiceName string `env:"OTEL_SERVICE_NAME" json:"otel_service_name"`
+
+	// OTELSampleRatio is the fraction of traces to sample (0..1].
+	OTELSampleRatio float64 `env:"OTEL_SAMPLE_RATIO" json:"otel_sample_ratio"`
 }
 
 // LoadConfig loads and returns the application configuration.
@@ -121,13 +138,16 @@ func LoadConfig() (config *Config, err error) {
 		MaxFileSize:      10 << 20, // 10 MiB
 		AllowedMimeTypes: []string{"image/jpeg", "image/png", "image/webp"},
 		StaticDir:        "./web/static",
+		OTELServiceName:  "avatars-service",
+		OTELSampleRatio:  1.0,
+		OTELInsecure:     true,
 	}
 
 	// Parse .env file.
 	err = godotenv.Load()
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Printf("No .env file found, using environment variables and flags")
+			fmt.Printf("No .env file found, using environment variables and flags\n")
 		} else {
 			return nil, fmt.Errorf("failed to load .env file: %w", err)
 		}
@@ -195,6 +215,12 @@ func LoadConfig() (config *Config, err error) {
 	mimeTypes := strings.Join(config.AllowedMimeTypes, ",")
 	fs.StringVar(&mimeTypes, "allowed-mime-types", mimeTypes, "comma-separated list of allowed MIME types")
 	fs.StringVar(&config.StaticDir, "static-dir", config.StaticDir, "path to static web assets")
+
+	// observability.
+	fs.StringVar(&config.OTLPEndpoint, "otlp-endpoint", config.OTLPEndpoint, "OTLP HTTP endpoint host:port")
+	fs.BoolVar(&config.OTELInsecure, "otel-insecure", config.OTELInsecure, "disable TLS on the OTLP connection")
+	fs.StringVar(&config.OTELServiceName, "otel-service-name", config.OTELServiceName, "OTel service.name")
+	fs.Float64Var(&config.OTELSampleRatio, "otel-sample-ratio", config.OTELSampleRatio, "trace sample ratio (0..1]")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return nil, fmt.Errorf("failed to parse flags: %w", err)
