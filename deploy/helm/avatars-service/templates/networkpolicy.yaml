@@ -1,0 +1,43 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "avatars-service.fullname" . }}-netpol
+  labels:
+    {{- include "avatars-service.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "avatars-service.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 9091
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432 # Postgres
+        - protocol: TCP
+          port: 5672 # RabbitMQ
+        - protocol: TCP
+          port: 9000 # MinIO
+        - protocol: TCP
+          port: 4318 # Jaeger
+
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53

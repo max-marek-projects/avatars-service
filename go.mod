@@ -14,7 +14,8 @@ require (
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/disintegration/imaging v1.6.2
 	github.com/exaring/otelpgx v0.12.0
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.5.0
+	github.com/go-chi/httprate v0.16.1
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
@@ -23,6 +24,7 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/rabbitmq/amqp091-go v1.15.0
 	github.com/riandyrn/otelchi v0.12.3
+	github.com/sony/gobreaker v1.0.0
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.46.0
@@ -55,6 +57,7 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lib/pq v1.12.3 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
@@ -62,6 +65,7 @@ require (
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
+	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.46.0 // indirect

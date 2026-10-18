@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "avatars-service.fullname" . }}-worker
+  labels:
+    {{- include "avatars-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "avatars-service.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "avatars-service.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: {{ include "avatars-service.fullname" . }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/app/worker"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: metrics
+              containerPort: 9091
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "avatars-service.fullname" . }}-config
+            - secretRef:
+                name: {{ include "avatars-service.fullname" . }}-secrets
+          livenessProbe:
+            tcpSocket:
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}

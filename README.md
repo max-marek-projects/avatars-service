@@ -9,34 +9,41 @@ Backend service for managing user avatars: upload, storage in an S3-compatible b
 - **Soft delete** with asynchronous S3 object cleanup.
 - **Placeholder** for users without an avatar (configurable S3 key).
 - **Observability** out of the box: OpenTelemetry → Jaeger, Prometheus metrics, JSON logs with `trace_id` → OpenSearch + Dashboards, alerts via Alertmanager.
+- **Kubernetes & Helm** ready: Includes a full Helm chart with Deployments, Services, Ingress, HPA, NetworkPolicy, and ServiceMonitor.
 - **Graceful shutdown** of both processes on SIGINT/SIGTERM/SIGQUIT.
 
 ## Architecture
 
-```text
-                          ┌──────────────┐
-              HTTP :8080  │   server     │  /api/v1/avatars
-   client ──────────────► │  (chi+otel)  │
-                          └──────┬───────┘
-                                 │ publish
-                                 ▼
-                          ┌──────────────┐       ┌──────────────┐
-                          │  rabbitmq    │◄──────┤   worker     │  consume
-                          └──────────────┘       │              │
-                                                 └──────┬───────┘
-                                                        │ upload thumbs
-                          ┌──────────────┐              │
-                          │  postgres    │◄─────────────┤
-                          │  (metadata)  │              │
-                          └──────────────┘              │
-                          ┌──────────────┐              │
-                          │  minio / S3  │◄─────────────┘
-                          └──────────────┘
+```mermaid
+flowchart TD
+    Client([Client / Browser]) -->|HTTP :80| Ingress[Nginx Ingress]
 
-Observability:
-  server/worker ──► OTLP ──► jaeger
-  server/worker ──► metrics ──► prometheus ──► grafana ──► alertmanager
-  server/worker ──► fluentd ──► fluent-bit ──► opensearch ──► opensearch-dashboards
+    subgraph K8s Cluster
+        Ingress --> SvcServer[Service: Server]
+        Ingress --> SvcWorker[Service: Worker-Metrics]
+
+        subgraph Server Deployment
+            SvcServer --> Pod1[Server Pod]
+            SvcServer --> Pod2[Server Pod]
+        end
+
+        subgraph Worker Deployment
+            W1[Worker Pod]
+            W2[Worker Pod]
+        end
+
+        Pod1 & Pod2 -->|SQL| DB[(PostgreSQL)]
+        W1 & W2 -->|SQL| DB
+
+        Pod1 & Pod2 -->|Upload| S3[(MinIO / S3)]
+        W1 & W2 -->|Thumbnails| S3
+
+        Pod1 & Pod2 -->|Publish| MQ[(RabbitMQ)]
+        MQ -->|Consume| W1 & W2
+
+        Pod1 & W1 -->|Traces| Jaeger[Jaeger]
+        Prometheus[Prometheus] -.->|Scrape /metrics| SvcServer & SvcWorker
+    end
 ```
 
 ## Quick start
@@ -44,7 +51,7 @@ Observability:
 Prerequisites: **Docker Desktop** (or Docker + Compose v2), **Go 1.22+** for local development.
 
 ```bash
-git clone https://github.com/<you>/avatars-service
+git clone https://github.com/&lt;you&gt;/avatars-service
 cd avatars-service
 
 # bring up the whole stack and start server + worker
@@ -53,19 +60,50 @@ make server
 
 The service becomes reachable at `http://localhost:8080` after 30–60 seconds.
 
+## Kubernetes Deployment (Helm)
+
+The project is packaged as a Helm chart located in `deploy/helm/avatars-service`.
+
+### Prerequisites
+
+- A running Kubernetes cluster (e.g., Rancher Desktop, Minikube, Kind).
+- Helm 3 installed.
+- Nginx Ingress Controller installed (`ingress-nginx`). If using Rancher Desktop, disable the default Traefik controller.
+- Prometheus Operator CRDs installed (for `ServiceMonitor`).
+
+### Deployment Steps
+
+1. **Install infrastructure dependencies** (PostgreSQL, MinIO, RabbitMQ, Jaeger, Vault) using Bitnami OCI charts
+2. **Install Prometheus CRDs** (required for ServiceMonitor)
+3. **Build and deploy the application**
+
+```bash
+make kuber
+make vault-init
+```
+
+4. **Configure hosts**:
+   Add the following line to `C:\Windows\System32\drivers\etc\hosts` (or `/etc/hosts`):
+
+```text
+127.0.0.1 avatars.example.com
+```
+
+5. Verify: `http://avatars.example.com/health`
+
 ## API
 
-| Method | Path | Headers | Description |
-| --- | --- | --- | --- |
-| `GET` | `/health` | — | Readiness probe (DB + S3 + broker). |
-| `GET` | `/metrics` | — | Prometheus metrics (server only). |
-| `POST` | `/api/v1/avatars` | `X-User-ID` | Upload an avatar (`multipart/form-data`, field `file`). |
-| `GET` | `/api/v1/avatars/{id}` | — | Download the original. |
-| `GET` | `/api/v1/avatars/{id}/metadata` | — | Metadata + thumbnail URLs. |
-| `DELETE` | `/api/v1/avatars/{id}` | `X-User-ID` | Soft delete (owner check). |
-| `GET` | `/api/v1/users/{user_id}/avatar` | — | Active avatar or placeholder. |
-| `DELETE` | `/api/v1/users/{user_id}/avatar` | `X-User-ID` | Delete the active avatar. |
-| `GET` | `/api/v1/users/{user_id}/avatars` | — | List active avatars. |
+| Method   | Path                              | Headers     | Description                                             |
+| -------- | --------------------------------- | ----------- | ------------------------------------------------------- |
+| `GET`    | `/health`                         | —           | Readiness probe (DB + S3 + broker).                     |
+| `GET`    | `/metrics`                        | —           | Prometheus metrics (server only).                       |
+| `POST`   | `/api/v1/avatars`                 | `X-User-ID` | Upload an avatar (`multipart/form-data`, field `file`). |
+| `GET`    | `/api/v1/avatars/{id}`            | —           | Download the original.                                  |
+| `GET`    | `/api/v1/avatars/{id}/metadata`   | —           | Metadata + thumbnail URLs.                              |
+| `DELETE` | `/api/v1/avatars/{id}`            | `X-User-ID` | Soft delete (owner check).                              |
+| `GET`    | `/api/v1/users/{user_id}/avatar`  | —           | Active avatar or placeholder.                           |
+| `DELETE` | `/api/v1/users/{user_id}/avatar`  | `X-User-ID` | Delete the active avatar.                               |
+| `GET`    | `/api/v1/users/{user_id}/avatars` | —           | List active avatars.                                    |
 
 HTML pages for manual testing: `GET /web/upload`, `GET /web/gallery/{user_id}`.
 
@@ -75,42 +113,43 @@ Limits: file size ≤ `MAX_FILE_SIZE` (10 MiB by default), MIME ∈ `ALLOWED_MIM
 
 Values are resolved in this order (highest priority first): CLI flags → JSON file (`-c path.json`) → env → `.env` → defaults.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `SERVER_ADDRESS` | `:8080` | HTTP server address. |
-| `LOGGER_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARN` / `ERROR`. |
-| `DATABASE_URI` | — | PostgreSQL DSN. |
-| `MIGRATIONS` | `./migrations` | Path to SQL migrations. |
-| `S3_ENDPOINT` | `minio:9000` | S3 host:port. |
-| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | `minio` / `minio12345` | Credentials. |
-| `S3_BUCKET` | `avatars` | Bucket name. |
-| `S3_USE_SSL` | `false` | HTTPS for S3. |
-| `RABBIT_URL` | `amqp://guest:guest@rabbitmq:5672/` | RabbitMQ DSN. |
-| `MAX_FILE_SIZE` | `10485760` | Size limit, bytes. |
-| `ALLOWED_MIME_TYPES` | `image/jpeg,image/png,image/webp` | Whitelist. |
-| `DEFAULT_AVATAR_KEY` | — | Placeholder S3 key. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | `jaeger:4318`. Empty disables tracing. |
-| `OTEL_SERVICE_NAME` | `avatars-service` | Service name in traces. |
-| `OTEL_SAMPLE_RATIO` | `1.0` | Fraction of traces to sample (0..1]. |
+| Variable                          | Default                             | Purpose                                                                    |
+| --------------------------------- | ----------------------------------- | -------------------------------------------------------------------------- |
+| `SERVER_ADDRESS`                  | `:8080`                             | HTTP server address.                                                       |
+| `LOGGER_LEVEL`                    | `INFO`                              | `DEBUG` / `INFO` / `WARN` / `ERROR`.                                       |
+| `USER`                            | `nonroot`                           | System user for OpenTelemetry resource detection (required in distroless). |
+| `DATABASE_URI`                    | —                                   | PostgreSQL DSN.                                                            |
+| `MIGRATIONS`                      | `./migrations`                      | Path to SQL migrations.                                                    |
+| `S3_ENDPOINT`                     | `minio:9000`                        | S3 host:port.                                                              |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | `minio` / `minio12345`              | Credentials.                                                               |
+| `S3_BUCKET`                       | `avatars`                           | Bucket name.                                                               |
+| `S3_USE_SSL`                      | `false`                             | HTTPS for S3.                                                              |
+| `RABBIT_URL`                      | `amqp://guest:guest@rabbitmq:5672/` | RabbitMQ DSN.                                                              |
+| `MAX_FILE_SIZE`                   | `10485760`                          | Size limit, bytes.                                                         |
+| `ALLOWED_MIME_TYPES`              | `image/jpeg,image/png,image/webp`   | Whitelist.                                                                 |
+| `DEFAULT_AVATAR_KEY`              | —                                   | Placeholder S3 key.                                                        |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`     | —                                   | `jaeger:4318`. Empty disables tracing.                                     |
+| `OTEL_SERVICE_NAME`               | `avatars-service`                   | Service name in traces.                                                    |
+| `OTEL_SAMPLE_RATIO`               | `1.0`                               | Fraction of traces to sample (0..1].                                       |
 
 Full list — in `internal/config/config.go`.
 
 ## Observability
 
-| Component | URL | What to look at |
-| --- | --- | --- |
-| Jaeger UI | <http://localhost:16686> | Traces, cross-process correlation server → worker by `trace_id`. |
-| Prometheus | <http://localhost:9090> | `http_requests_total`, `avatar_uploads_total`, `avatar_processing_duration_seconds`. Rules at `/rules`. |
-| Alertmanager | <http://localhost:9093> | Active and resolved alerts. |
-| Grafana | <http://localhost:3000> (admin/admin) | Dashboards for metrics. |
-| OpenSearch Dashboards | <http://localhost:5601> | Search logs by `trace_id`, `level`, `msg`. |
-| RabbitMQ Management | <http://localhost:15672> (guest/guest) | Queues `avatars.upload` / `avatars.delete`. |
-| MinIO Console | <http://localhost:9001> | Bucket `avatars`. |
+| Component             | URL                                    | What to look at                                                                                         |
+| --------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Jaeger UI             | <http://localhost:16686>               | Traces, cross-process correlation server → worker by `trace_id`.                                        |
+| Prometheus            | <http://localhost:9090>                | `http_requests_total`, `avatar_uploads_total`, `avatar_processing_duration_seconds`. Rules at `/rules`. |
+| Alertmanager          | <http://localhost:9093>                | Active and resolved alerts.                                                                             |
+| Grafana               | <http://localhost:3000> (admin/admin)  | Dashboards for metrics.                                                                                 |
+| OpenSearch Dashboards | <http://localhost:5601>                | Search logs by `trace_id`, `level`, `msg`.                                                              |
+| RabbitMQ Management   | <http://localhost:15672> (guest/guest) | Queues `avatars.upload` / `avatars.delete`.                                                             |
+| MinIO Console         | <http://localhost:9001>                | Bucket `avatars`.                                                                                       |
 
 ### Verifying end-to-end correlation
 
 1. Upload an avatar and grab a `trace_id` from Jaeger (open any trace).
-2. In OpenSearch Dashboards run `trace_id:"<id>"` — you will see logs from **both** server and worker.
+2. In OpenSearch Dashboards run `trace_id:"&lt;id&gt;"` — you will see logs from **both** server and worker.
 3. Stop the worker (`docker compose stop worker`) — after ~45 seconds `WorkerDown` transitions to `Firing` at `http://localhost:9090/alerts` and becomes Active at `http://localhost:9093`.
 
 ## Development
@@ -145,6 +184,7 @@ internal/
   tracing/        # OTel init + helpers
   worker/         # event processing (resize, delete)
 migrations/       # SQL migrations
+deploy/helm/      # Kubernetes Helm chart
 docker/           # compose, Dockerfile, observability configs
 ```
 

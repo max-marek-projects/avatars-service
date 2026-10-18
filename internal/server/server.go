@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/httprate"
 	"github.com/max-marek-projects/avatars-service/internal/handlers"
 	"github.com/max-marek-projects/avatars-service/internal/middlewares"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -86,6 +87,22 @@ func NewRouter(h *handlers.Handler, staticDir string, logger *slog.Logger) chi.R
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
+
+	// Trust boundary: only accept X-Forwarded-For from cluster pod CIDRs.
+	r.Use(middleware.ClientIPFromXFF(
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+	))
+
+	// Rate limit per real client IP: 100 req/min.
+	r.Use(httprate.LimitBy(100, 1*time.Minute, func(r *http.Request) (string, error) {
+		ip := middleware.GetClientIP(r.Context())
+		if ip == "" {
+			return "", fmt.Errorf("no client IP resolved")
+		}
+		return httprate.CanonicalizeIP(ip), nil
+	}))
 	r.Use(middlewares.Metrics)
 	r.Use(otelchi.Middleware("http.server",
 		otelchi.WithChiRoutes(r),
