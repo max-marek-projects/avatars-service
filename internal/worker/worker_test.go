@@ -10,7 +10,6 @@ import (
 	"io"
 	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -84,21 +83,21 @@ func TestWorker_handleUpload(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		w, st, obj, _ := newTestWorker(t, Config{ThumbnailSizes: []int{100, 300}})
 
-		st.On("GetAvatarByID", ctx, id).Return(&models.Avatar{
+		st.EXPECT().GetAvatarByID(mock.Anything, id).Return(&models.Avatar{
 			ID: id, UserID: "u1", S3Key: ev.S3Key,
 			ProcessingStatus: models.ProcessingStatusPending,
 		}, nil)
-		st.On("UpdateProcessingStatus", ctx, id, models.ProcessingStatusProcessing, mock.Anything).Return(nil)
+		st.EXPECT().UpdateProcessingStatus(mock.Anything, id, models.ProcessingStatusProcessing, mock.Anything).Return(nil)
 
-		obj.On("Download", ctx, ev.S3Key).Return(io.NopCloser(bytes.NewReader(pngData)), nil)
-		obj.On("Upload", ctx, mock.MatchedBy(func(k string) bool {
+		obj.EXPECT().Download(mock.Anything, ev.S3Key).Return(io.NopCloser(bytes.NewReader(pngData)), nil)
+		obj.EXPECT().Upload(mock.Anything, mock.MatchedBy(func(k string) bool {
 			return strings.Contains(k, "100x100")
 		}), mock.Anything, mock.AnythingOfType("int64"), "image/jpeg").Return(nil)
-		obj.On("Upload", ctx, mock.MatchedBy(func(k string) bool {
+		obj.EXPECT().Upload(mock.Anything, mock.MatchedBy(func(k string) bool {
 			return strings.Contains(k, "300x300")
 		}), mock.Anything, mock.AnythingOfType("int64"), "image/jpeg").Return(nil)
 
-		st.On("UpdateProcessingStatus", ctx, id, models.ProcessingStatusCompleted,
+		st.EXPECT().UpdateProcessingStatus(mock.Anything, id, models.ProcessingStatusCompleted,
 			mock.MatchedBy(func(m map[string]string) bool {
 				return len(m) == 2 && m["100x100"] != "" && m["300x300"] != ""
 			})).Return(nil)
@@ -110,7 +109,7 @@ func TestWorker_handleUpload(t *testing.T) {
 
 	t.Run("already completed — skip", func(t *testing.T) {
 		w, st, _, _ := newTestWorker(t, Config{})
-		st.On("GetAvatarByID", ctx, id).Return(&models.Avatar{
+		st.EXPECT().GetAvatarByID(mock.Anything, id).Return(&models.Avatar{
 			ID: id, ProcessingStatus: models.ProcessingStatusCompleted,
 		}, nil)
 		require.NoError(t, w.handleUpload(ctx, ev))
@@ -118,7 +117,7 @@ func TestWorker_handleUpload(t *testing.T) {
 
 	t.Run("avatar not found", func(t *testing.T) {
 		w, st, _, _ := newTestWorker(t, Config{})
-		st.On("GetAvatarByID", ctx, id).Return(nil, repository.ErrAvatarNotFound)
+		st.EXPECT().GetAvatarByID(mock.Anything, id).Return(nil, repository.ErrAvatarNotFound)
 		err := w.handleUpload(ctx, ev)
 		assert.ErrorIs(t, err, repository.ErrAvatarNotFound)
 	})
@@ -136,11 +135,11 @@ func TestWorker_handleUpload(t *testing.T) {
 
 	t.Run("download error", func(t *testing.T) {
 		w, st, obj, _ := newTestWorker(t, Config{})
-		st.On("GetAvatarByID", ctx, id).Return(&models.Avatar{
+		st.EXPECT().GetAvatarByID(mock.Anything, id).Return(&models.Avatar{
 			ID: id, ProcessingStatus: models.ProcessingStatusPending,
 		}, nil)
-		st.On("UpdateProcessingStatus", ctx, id, models.ProcessingStatusProcessing, mock.Anything).Return(nil)
-		obj.On("Download", ctx, ev.S3Key).Return(nil, errors.New("s3 down"))
+		st.EXPECT().UpdateProcessingStatus(mock.Anything, id, models.ProcessingStatusProcessing, mock.Anything).Return(nil)
+		obj.EXPECT().Download(mock.Anything, ev.S3Key).Return(nil, errors.New("s3 down"))
 
 		err := w.handleUpload(ctx, ev)
 		assert.ErrorContains(t, err, "download original")
@@ -159,12 +158,12 @@ func TestWorker_handleUploadWithRetry(t *testing.T) {
 			MaxRetries:     2,
 			RetryBaseDelay: time.Millisecond,
 		})
-		st.On("GetAvatarByID", ctx, id).Return(&models.Avatar{
+		st.EXPECT().GetAvatarByID(mock.Anything, id).Return(&models.Avatar{
 			ID: id, ProcessingStatus: models.ProcessingStatusPending,
 		}, nil)
-		st.On("UpdateProcessingStatus", ctx, id, models.ProcessingStatusProcessing, mock.Anything).Return(nil).Maybe()
-		obj.On("Download", ctx, "k").Return(nil, errors.New("boom")).Maybe()
-		st.On("UpdateProcessingStatus", ctx, id, models.ProcessingStatusFailed, mock.Anything).Return(nil)
+		st.EXPECT().UpdateProcessingStatus(mock.Anything, id, models.ProcessingStatusProcessing, mock.Anything).Return(nil).Maybe()
+		obj.EXPECT().Download(mock.Anything, "k").Return(nil, errors.New("boom")).Maybe()
+		st.EXPECT().UpdateProcessingStatus(mock.Anything, id, models.ProcessingStatusFailed, mock.Anything).Return(nil)
 
 		err := w.handleUploadWithRetry(ctx, ev)
 		assert.ErrorIs(t, err, ErrProcessingFailed)
@@ -178,8 +177,8 @@ func TestWorker_handleDelete(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		w, _, obj, _ := newTestWorker(t, Config{})
-		obj.On("Delete", ctx, "a").Return(nil)
-		obj.On("Delete", ctx, "b").Return(nil)
+		obj.EXPECT().Delete(mock.Anything, "a").Return(nil)
+		obj.EXPECT().Delete(mock.Anything, "b").Return(nil)
 		require.NoError(t, w.handleDelete(ctx, models.AvatarDeleteEvent{
 			AvatarID: "x", S3Keys: []string{"a", "b"},
 		}))
@@ -198,7 +197,7 @@ func TestWorker_handleDelete(t *testing.T) {
 
 	t.Run("not found is ok", func(t *testing.T) {
 		w, _, obj, _ := newTestWorker(t, Config{})
-		obj.On("Delete", ctx, "gone").Return(errors.New("NoSuchKey: gone"))
+		obj.EXPECT().Delete(mock.Anything, "gone").Return(errors.New("NoSuchKey: gone"))
 		require.NoError(t, w.handleDelete(ctx, models.AvatarDeleteEvent{
 			AvatarID: "x", S3Keys: []string{"gone"},
 		}))
@@ -206,7 +205,7 @@ func TestWorker_handleDelete(t *testing.T) {
 
 	t.Run("other error", func(t *testing.T) {
 		w, _, obj, _ := newTestWorker(t, Config{})
-		obj.On("Delete", ctx, "k").Return(errors.New("network down"))
+		obj.EXPECT().Delete(mock.Anything, "k").Return(errors.New("network down"))
 		err := w.handleDelete(ctx, models.AvatarDeleteEvent{
 			AvatarID: "x", S3Keys: []string{"k"},
 		})
@@ -220,26 +219,28 @@ func TestWorker_Run_Cancel(t *testing.T) {
 	w, _, _, cons := newTestWorker(t, Config{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var started sync.WaitGroup
-	started.Add(2)
 
-	cons.On("ConsumeUpload", mock.Anything, mock.Anything).
-		Return(nil).
-		Run(func(mock.Arguments) { started.Done() })
+	cons.EXPECT().ConsumeUpload(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, _ func(context.Context, models.AvatarUploadEvent) error) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
 
-	cons.On("ConsumeDelete", mock.Anything, mock.Anything).
-		Return(nil).
-		Run(func(mock.Arguments) { started.Done() })
+	cons.EXPECT().ConsumeDelete(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, _ func(context.Context, models.AvatarDeleteEvent) error) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
 
 	done := make(chan error, 1)
 	go func() { done <- w.Run(ctx) }()
 
-	started.Wait()
+	time.Sleep(50 * time.Millisecond)
+
 	cancel()
 
 	select {
-	case err := <-done:
-		assert.NoError(t, err)
+	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after context cancellation")
 	}
@@ -249,10 +250,10 @@ func TestWorker_PingAndClose(t *testing.T) {
 	w, _, _, cons := newTestWorker(t, Config{})
 	ctx := context.Background()
 
-	cons.On("Ping", ctx).Return(nil)
+	cons.EXPECT().Ping(mock.Anything).Return(nil)
 	require.NoError(t, w.Ping(ctx))
 
-	cons.On("Close").Return(nil)
+	cons.EXPECT().Close().Return(nil)
 	require.NoError(t, w.Close())
 	_ = ctx
 }

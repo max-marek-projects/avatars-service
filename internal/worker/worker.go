@@ -74,17 +74,17 @@ func (w *Worker) Run(ctx context.Context) error {
 	errCh := make(chan error, 2)
 
 	go func() {
-		w.logger.Info("worker: consuming upload events")
+		w.logger.InfoContext(ctx, "worker: consuming upload events")
 		errCh <- w.consumer.ConsumeUpload(ctx, w.handleUploadWithRetry)
 	}()
 	go func() {
-		w.logger.Info("worker: consuming delete events")
+		w.logger.InfoContext(ctx, "worker: consuming delete events")
 		errCh <- w.consumer.ConsumeDelete(ctx, w.handleDeleteWithRetry)
 	}()
 
 	select {
 	case <-ctx.Done():
-		w.logger.Info("worker: context cancelled, draining")
+		w.logger.InfoContext(ctx, "worker: context cancelled, draining")
 		return nil
 	case err := <-errCh:
 		return err

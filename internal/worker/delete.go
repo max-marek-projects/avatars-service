@@ -7,7 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/max-marek-projects/avatars-service/internal/metrics"
 	"github.com/max-marek-projects/avatars-service/internal/models"
+	"github.com/max-marek-projects/avatars-service/internal/tracing"
 )
 
 // handleDeleteWithRetry wraps handleDelete with exponential backoff.
@@ -21,7 +26,7 @@ func (w *Worker) handleDeleteWithRetry(ctx context.Context, ev models.AvatarDele
 			return nil
 		}
 		lastErr = err
-		w.logger.Warn("worker: delete attempt failed",
+		w.logger.WarnContext(ctx, "worker: delete attempt failed",
 			slog.String("avatar_id", ev.AvatarID),
 			slog.Int("attempt", attempt),
 			slog.Duration("next_delay", delay),
@@ -40,11 +45,27 @@ func (w *Worker) handleDeleteWithRetry(ctx context.Context, ev models.AvatarDele
 // handleDelete removes every S3 object listed in the event.
 // Deleting a missing object is treated as success (S3 DELETE is idempotent).
 func (w *Worker) handleDelete(ctx context.Context, ev models.AvatarDeleteEvent) error {
+	ctx, span := tracer.Start(ctx, "Worker.handleDelete",
+		trace.WithAttributes(
+			attribute.String("avatar.id", ev.AvatarID),
+			attribute.Int("s3.keys.count", len(ev.S3Keys)),
+		),
+	)
+	defer span.End()
+
+	start := time.Now()
+	defer func() {
+		metrics.AvatarProcessingDuration.WithLabelValues("delete").
+			Observe(time.Since(start).Seconds())
+	}()
+
 	if ev.AvatarID == "" {
-		return fmt.Errorf("worker: empty delete event")
+		err := fmt.Errorf("worker: empty delete event")
+		tracing.RecordError(span, err)
+		return err
 	}
 	if len(ev.S3Keys) == 0 {
-		w.logger.Info("worker: nothing to delete", slog.String("avatar_id", ev.AvatarID))
+		w.logger.InfoContext(ctx, "worker: nothing to delete", slog.String("avatar_id", ev.AvatarID))
 		return nil
 	}
 
@@ -55,18 +76,20 @@ func (w *Worker) handleDelete(ctx context.Context, ev models.AvatarDeleteEvent) 
 			continue
 		}
 		if err := w.objects.Delete(ctx, key); err != nil {
-			// Some S3 SDKs return a "NoSuchKey" / 404 error; treat as success.
 			if isNotFound(err) {
-				w.logger.Info("worker: object already gone",
+				w.logger.InfoContext(ctx, "worker: object already gone",
 					slog.String("key", key))
 				continue
 			}
-			w.logger.Error("worker: delete object failed",
+			w.logger.ErrorContext(ctx, "worker: delete object failed",
 				slog.String("key", key), slog.Any("error", err))
 			if firstErr == nil {
 				firstErr = fmt.Errorf("delete %s: %w", key, err)
 			}
 		}
+	}
+	if firstErr != nil {
+		tracing.RecordError(span, firstErr)
 	}
 	return firstErr
 }

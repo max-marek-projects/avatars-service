@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/XSAM/otelsql"
+	"github.com/exaring/otelpgx"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -14,9 +16,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/max-marek-projects/avatars-service/internal/config"
 	"github.com/max-marek-projects/avatars-service/internal/models"
+	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
 )
 
 // connect establishes a connection to the database and returns a pgxpool.Pool.
@@ -28,10 +31,14 @@ func connect(ctx context.Context, cfg *config.DBConf) (*pgxpool.Pool, error) {
 	poolConfig.MaxConns = cfg.MaxOpenConns
 	poolConfig.MinConns = cfg.MaxIdleConns
 	poolConfig.MaxConnLifetime = cfg.ConnMaxLifetime
+	poolConfig.ConnConfig.Tracer = otelpgx.NewTracer()
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)
+	}
+	if err := otelpgx.RecordStats(pool); err != nil {
+		return nil, fmt.Errorf("unable to record database stats: %w", err)
 	}
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
@@ -71,7 +78,7 @@ func NewDBStorage(ctx context.Context, dbURL string, forceMigrations bool, logge
 		config:  cfg,
 		logger:  logger,
 	}
-	if err := dbs.runMigrations(pool); err != nil {
+	if err := dbs.runMigrations(ctx, dbURL); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
@@ -79,11 +86,16 @@ func NewDBStorage(ctx context.Context, dbURL string, forceMigrations bool, logge
 }
 
 // runMigrations applies database migrations from the configured path.
-func (dbs *dbStorage) runMigrations(pool *pgxpool.Pool) error {
-	db := stdlib.OpenDBFromPool(pool)
+func (dbs *dbStorage) runMigrations(ctx context.Context, dbURL string) error {
+	db, err := otelsql.Open("pgx", dbURL,
+		otelsql.WithAttributes(semconv.DBSystemPostgreSQL),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to open instrumented DB: %w", err)
+	}
 	defer db.Close()
 
-	dbs.logger.Info("Running migrations", slog.String("path", dbs.config.MigrationsPath))
+	dbs.logger.InfoContext(ctx, "Running migrations", slog.String("path", dbs.config.MigrationsPath))
 
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
@@ -101,12 +113,12 @@ func (dbs *dbStorage) runMigrations(pool *pgxpool.Pool) error {
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		if errDirty, ok := errors.AsType[migrate.ErrDirty](err); ok && dbs.config.ForceMigrations {
-			dbs.logger.Warn("Database is dirty, forcing to previous version",
+			dbs.logger.WarnContext(ctx, "Database is dirty, forcing to previous version",
 				slog.Int("dirty_version", errDirty.Version))
 			if err := m.Force(max(errDirty.Version-1, 1)); err != nil {
 				return fmt.Errorf("failed to force version: %w", err)
 			}
-			return dbs.runMigrations(pool)
+			return dbs.runMigrations(ctx, dbURL)
 		}
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
@@ -236,7 +248,6 @@ func (dbs *dbStorage) ListAvatarsByUserID(ctx context.Context, userID string) ([
 	return result, nil
 }
 
-// UpdateUploadStatus updates the upload_status column.
 // UpdateUploadStatus updates the upload_status column.
 func (dbs *dbStorage) UpdateUploadStatus(
 	ctx context.Context,

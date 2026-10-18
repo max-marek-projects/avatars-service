@@ -1,0 +1,103 @@
+groups:
+  - name: avatars-service.availability
+    interval: 15s
+    rules:
+      # Target scrape failed for 30s.
+      - alert: TargetDown
+        expr: up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Target {{ $labels.job }} is down"
+          description: "Prometheus cannot scrape {{ $labels.instance }} (job={{ $labels.job }}) for >30s."
+
+      # One specific service is down.
+      - alert: ServerDown
+        expr: up{job="avatars-server"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "avatars-server is down"
+          description: "HTTP server {{ $labels.instance }} has been unreachable for >30s."
+
+      - alert: WorkerDown
+        expr: up{job="avatars-worker"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "avatars-worker is down"
+          description: "Worker metrics endpoint {{ $labels.instance }} has been unreachable for >30s."
+
+  - name: avatars-service.http
+    interval: 15s
+    rules:
+      # 5xx responses > 5% of total traffic over 5 minutes.
+      - alert: HighHTTPErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP 5xx error rate"
+          description: "5xx rate is {{ $value | humanizePercentage }} over the last 5m (>5%)."
+
+      # p95 latency > 1s over 5 minutes (server side).
+      - alert: HighHTTPLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p95 latency on avatars-server"
+          description: "p95 request duration is {{ $value }}s (>1s) over the last 5m."
+
+  - name: avatars-service.business
+    interval: 15s
+    rules:
+      # Uploads failing with internal errors.
+      - alert: AvatarUploadInternalErrors
+        expr: |
+          sum(rate(avatar_uploads_total{status="internal_error"}[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Avatar uploads failing"
+          description: "Internal-error uploads are {{ $value }}/s over the last 5m."
+
+      # Deletions failing internally.
+      - alert: AvatarDeleteInternalErrors
+        expr: |
+          sum(rate(avatar_deletes_total{status="internal_error"}[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Avatar deletions failing"
+          description: "Internal-error deletions are {{ $value }}/s over the last 5m."
+
+      # Worker processing is slow (p95 > 5s) — S3/DB/CPU are struggling.
+      - alert: WorkerProcessingSlowP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(avatar_processing_duration_seconds_bucket[5m])) by (le, stage)
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Worker processing is slow (stage={{ $labels.stage }})"
+          description: "p95 worker stage {{ $labels.stage }} is {{ $value }}s (>5s) over the last 5m."

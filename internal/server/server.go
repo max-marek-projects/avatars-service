@@ -9,12 +9,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/max-marek-projects/avatars-service/internal/handlers"
 	"github.com/max-marek-projects/avatars-service/internal/middlewares"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/riandyrn/otelchi"
 )
 
 // server wraps an http.server with a chi router and the avatar HTTP handler.
@@ -82,9 +86,23 @@ func NewRouter(h *handlers.Handler, staticDir string, logger *slog.Logger) chi.R
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
+	r.Use(middlewares.Metrics)
+	r.Use(otelchi.Middleware("http.server",
+		otelchi.WithChiRoutes(r),
+		otelchi.WithFilter(func(r *http.Request) bool {
+			if slices.Contains([]string{"/health", "/metrics"}, r.URL.Path) {
+				return false
+			}
+			if strings.HasPrefix(r.URL.Path, "/static/") {
+				return false
+			}
+			return true
+		}),
+	))
 	r.Use(middlewares.RequestsLogger(logger))
 
 	r.Get("/health", h.Health)
+	r.Handle("/metrics", promhttp.Handler())
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Route("/avatars", func(r chi.Router) {

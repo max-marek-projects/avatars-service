@@ -12,8 +12,12 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/max-marek-projects/avatars-service/internal/metrics"
 	"github.com/max-marek-projects/avatars-service/internal/models"
 	"github.com/max-marek-projects/avatars-service/internal/repository"
+	"github.com/max-marek-projects/avatars-service/internal/tracing"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Config holds tunable service parameters.
@@ -83,7 +87,26 @@ func (s *service) UploadAvatar(
 	r io.Reader,
 	fileName, contentType string,
 	size int64,
-) (*models.Avatar, error) {
+) (_ *models.Avatar, err error) {
+	// traces
+	ctx, span := tracer.Start(ctx, "Service.UploadAvatar",
+		trace.WithAttributes(
+			attribute.String("user.id", userID),
+			attribute.String("file.name", fileName),
+			attribute.Int64("file.size_bytes", size),
+			attribute.String("file.content_type", contentType),
+		),
+	)
+	defer span.End()
+
+	// metrics
+	defer func() {
+		metrics.AvatarUploadsTotal.WithLabelValues(classifyUploadError(err)).Inc()
+		if err == nil {
+			metrics.AvatarUploadBytes.Observe(float64(size))
+		}
+	}()
+
 	if userID == "" {
 		return nil, fmt.Errorf("empty user id: %w", ErrInvalidArgument)
 	}
@@ -105,9 +128,11 @@ func (s *service) UploadAvatar(
 
 	id := uuid.New()
 	key := s.buildOriginalKey(userID, id, fileName)
+	span.SetAttributes(attribute.String("avatar.id", id.String()), attribute.String("s3.key", key))
 
 	// 1. Upload original to S3.
 	if err := s.objects.Upload(ctx, key, r, size, contentType); err != nil {
+		tracing.RecordError(span, err)
 		return nil, fmt.Errorf("failed to upload file to S3: %w", err)
 	}
 
@@ -126,10 +151,11 @@ func (s *service) UploadAvatar(
 	if err := s.storage.CreateAvatar(ctx, avatar); err != nil {
 		// Rollback the S3 upload: we do not want orphan files.
 		if delErr := s.objects.Delete(ctx, key); delErr != nil {
-			s.logger.Error("failed to rollback S3 upload",
+			s.logger.ErrorContext(ctx, "failed to rollback S3 upload",
 				slog.String("key", key),
 				slog.Any("error", delErr))
 		}
+		tracing.RecordError(span, err)
 		if errors.Is(err, repository.ErrAlreadyInStorage) {
 			return nil, ErrAvatarConflict
 		}
@@ -146,14 +172,15 @@ func (s *service) UploadAvatar(
 		S3Key:    key,
 	}
 	if err := s.publisher.PublishUpload(ctx, event); err != nil {
-		s.logger.Error("failed to publish upload event",
+		s.logger.ErrorContext(ctx, "failed to publish upload event",
 			slog.String("avatar_id", id.String()),
 			slog.Any("error", err))
 		if updErr := s.storage.UpdateUploadStatus(ctx, id, models.UploadStatusFailed); updErr != nil {
-			s.logger.Error("failed to mark avatar as failed",
+			s.logger.ErrorContext(ctx, "failed to mark avatar as failed",
 				slog.String("avatar_id", id.String()),
 				slog.Any("error", updErr))
 		}
+		tracing.RecordError(span, err)
 		return nil, fmt.Errorf("failed to enqueue avatar for processing: %w", err)
 	}
 	return avatar, nil
@@ -163,6 +190,11 @@ func (s *service) UploadAvatar(
 
 // GetAvatarByID returns the avatar and a streaming reader for the original file.
 func (s *service) GetAvatarByID(ctx context.Context, id uuid.UUID) (*models.Avatar, io.ReadCloser, error) {
+	// traces
+	ctx, span := tracer.Start(ctx, "Service.GetAvatarByID",
+		trace.WithAttributes(attribute.String("avatar.id", id.String())))
+	defer span.End()
+
 	if id == uuid.Nil {
 		return nil, nil, fmt.Errorf("empty avatar id: %w", ErrInvalidArgument)
 	}
@@ -174,10 +206,12 @@ func (s *service) GetAvatarByID(ctx context.Context, id uuid.UUID) (*models.Avat
 		if errors.Is(err, repository.ErrInvalidArgument) {
 			return nil, nil, ErrInvalidArgument
 		}
+		tracing.RecordError(span, err)
 		return nil, nil, fmt.Errorf("failed to get avatar: %w", err)
 	}
 	rc, err := s.objects.Download(ctx, avatar.S3Key)
 	if err != nil {
+		tracing.RecordError(span, err)
 		return nil, nil, fmt.Errorf("failed to download avatar: %w", err)
 	}
 	return avatar, rc, nil
@@ -187,6 +221,11 @@ func (s *service) GetAvatarByID(ctx context.Context, id uuid.UUID) (*models.Avat
 // has no uploaded avatar and DefaultAvatarKey is configured, the placeholder
 // is returned instead (this is the main avatars-service use case).
 func (s *service) GetActiveAvatar(ctx context.Context, userID string) (*models.Avatar, io.ReadCloser, error) {
+	// traces
+	ctx, span := tracer.Start(ctx, "Service.GetActiveAvatar",
+		trace.WithAttributes(attribute.String("user.id", userID)))
+	defer span.End()
+
 	if userID == "" {
 		return nil, nil, fmt.Errorf("empty user id: %w", ErrInvalidArgument)
 	}
@@ -209,6 +248,11 @@ func (s *service) GetActiveAvatar(ctx context.Context, userID string) (*models.A
 
 // GetAvatarMetadata returns avatar metadata without touching S3.
 func (s *service) GetAvatarMetadata(ctx context.Context, id uuid.UUID) (*models.Avatar, error) {
+	// traces
+	ctx, span := tracer.Start(ctx, "Service.GetAvatarMetadata",
+		trace.WithAttributes(attribute.String("avatar.id", id.String())))
+	defer span.End()
+
 	if id == uuid.Nil {
 		return nil, fmt.Errorf("empty avatar id: %w", ErrInvalidArgument)
 	}
@@ -227,6 +271,11 @@ func (s *service) GetAvatarMetadata(ctx context.Context, id uuid.UUID) (*models.
 
 // ListUserAvatars returns all active avatars of the user.
 func (s *service) ListUserAvatars(ctx context.Context, userID string) ([]models.Avatar, error) {
+	// traces
+	ctx, span := tracer.Start(ctx, "Service.ListUserAvatars",
+		trace.WithAttributes(attribute.String("user.id", userID)))
+	defer span.End()
+
 	if userID == "" {
 		return nil, fmt.Errorf("empty user id: %w", ErrInvalidArgument)
 	}
@@ -237,6 +286,7 @@ func (s *service) ListUserAvatars(ctx context.Context, userID string) ([]models.
 		}
 		return nil, fmt.Errorf("failed to list avatars: %w", err)
 	}
+	span.SetAttributes(attribute.Int("avatars.count", len(avatars)))
 	return avatars, nil
 }
 
@@ -244,7 +294,20 @@ func (s *service) ListUserAvatars(ctx context.Context, userID string) ([]models.
 
 // DeleteAvatar soft-deletes an avatar and enqueues async S3 cleanup.
 // Only the owner (matching X-User-ID) can delete.
-func (s *service) DeleteAvatar(ctx context.Context, id uuid.UUID, userID string) error {
+func (s *service) DeleteAvatar(ctx context.Context, id uuid.UUID, userID string) (err error) {
+	// traces
+	ctx, span := tracer.Start(ctx, "Service.DeleteAvatar",
+		trace.WithAttributes(
+			attribute.String("avatar.id", id.String()),
+			attribute.String("user.id", userID),
+		),
+	)
+	defer span.End()
+	// metrics
+	defer func() {
+		metrics.AvatarDeletesTotal.WithLabelValues(classifyDeleteError(err)).Inc()
+	}()
+
 	if id == uuid.Nil {
 		return fmt.Errorf("empty avatar id: %w", ErrInvalidArgument)
 	}
@@ -257,6 +320,7 @@ func (s *service) DeleteAvatar(ctx context.Context, id uuid.UUID, userID string)
 		if errors.Is(err, repository.ErrAvatarNotFound) {
 			return ErrAvatarNotFound
 		}
+		tracing.RecordError(span, err)
 		return fmt.Errorf("failed to fetch avatar: %w", err)
 	}
 	if avatar.UserID != userID {
@@ -270,6 +334,7 @@ func (s *service) DeleteAvatar(ctx context.Context, id uuid.UUID, userID string)
 		if errors.Is(err, repository.ErrNoChanges) {
 			return ErrNoChanges
 		}
+		tracing.RecordError(span, err)
 		return fmt.Errorf("failed to soft-delete avatar: %w", err)
 	}
 
@@ -278,7 +343,19 @@ func (s *service) DeleteAvatar(ctx context.Context, id uuid.UUID, userID string)
 }
 
 // DeleteActiveUserAvatar soft-deletes the active avatar of the user (by header).
-func (s *service) DeleteActiveUserAvatar(ctx context.Context, userID string) error {
+func (s *service) DeleteActiveUserAvatar(ctx context.Context, userID string) (err error) {
+	// traces
+	ctx, span := tracer.Start(ctx, "Service.DeleteActiveUserAvatar",
+		trace.WithAttributes(
+			attribute.String("user.id", userID),
+		),
+	)
+	defer span.End()
+	// metrics
+	defer func() {
+		metrics.AvatarDeletesTotal.WithLabelValues(classifyDeleteError(err)).Inc()
+	}()
+
 	if userID == "" {
 		return fmt.Errorf("empty user id: %w", ErrInvalidArgument)
 	}
@@ -287,6 +364,7 @@ func (s *service) DeleteActiveUserAvatar(ctx context.Context, userID string) err
 		if errors.Is(err, repository.ErrAvatarNotFound) {
 			return ErrAvatarNotFound
 		}
+		tracing.RecordError(span, err)
 		return fmt.Errorf("failed to fetch active avatar: %w", err)
 	}
 	if err := s.storage.SoftDeleteActiveUserAvatar(ctx, userID); err != nil {
@@ -296,6 +374,7 @@ func (s *service) DeleteActiveUserAvatar(ctx context.Context, userID string) err
 		if errors.Is(err, repository.ErrNoChanges) {
 			return ErrNoChanges
 		}
+		tracing.RecordError(span, err)
 		return fmt.Errorf("failed to soft-delete active avatar: %w", err)
 	}
 	s.publishDelete(ctx, avatar)
@@ -306,6 +385,10 @@ func (s *service) DeleteActiveUserAvatar(ctx context.Context, userID string) err
 
 // Health probes all dependencies (DB, S3, broker) and returns an aggregated status.
 func (s *service) Health(ctx context.Context) models.HealthStatus {
+	// traces
+	ctx, span := tracer.Start(ctx, "Service.Health")
+	defer span.End()
+
 	details := map[string]models.ComponentHealth{}
 	status := "ok"
 
@@ -321,7 +404,7 @@ func (s *service) Health(ctx context.Context) models.HealthStatus {
 	probe("database", s.storage.Ping(ctx))
 	probe("s3", s.objects.Ping(ctx))
 	probe("broker", s.publisher.Ping(ctx))
-
+	span.SetAttributes(attribute.String("health.status", status))
 	return models.HealthStatus{Status: status, Details: details}
 }
 
@@ -343,7 +426,7 @@ func (s *service) publishDelete(ctx context.Context, avatar *models.Avatar) {
 		S3Keys:   keys,
 	}
 	if err := s.publisher.PublishDelete(ctx, event); err != nil {
-		s.logger.Error("failed to publish delete event",
+		s.logger.ErrorContext(ctx, "failed to publish delete event",
 			slog.String("avatar_id", avatar.ID.String()),
 			slog.Any("error", err))
 	}

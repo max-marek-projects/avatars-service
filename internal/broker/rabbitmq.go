@@ -11,6 +11,8 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/max-marek-projects/avatars-service/internal/models"
 )
@@ -93,11 +95,21 @@ func (p *rabbitPublisher) publish(ctx context.Context, key, id string, body []by
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// Inject W3C trace context into AMQP headers.
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+
+	headers := amqp.Table{}
+	for k, v := range carrier {
+		headers[k] = v
+	}
+
 	if err := p.ch.PublishWithContext(ctx, p.exchange, key, false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		DeliveryMode: amqp.Persistent,
 		MessageId:    id,
 		Timestamp:    time.Now(),
+		Headers:      headers,
 		Body:         body,
 	}); err != nil {
 		return fmt.Errorf("rabbit publish %s: %w", key, err)
@@ -197,17 +209,20 @@ func NewRabbitConsumer(cfg RabbitConfig, logger *slog.Logger) (*rabbitConsumer, 
 // ConsumeUpload blocks and calls handler for each AvatarUploadEvent.
 // On handler error it Nacks without requeue; the handler itself must do
 // bounded retries.
-func (c *rabbitConsumer) ConsumeUpload(ctx context.Context, handler func(context.Context, models.AvatarUploadEvent) error) error {
+func (c *rabbitConsumer) ConsumeUpload(
+	ctx context.Context,
+	handler func(context.Context, models.AvatarUploadEvent) error,
+) error {
 	deliveries, err := c.ch.Consume(c.uploadQ, "", false, false, false, false, nil)
 	if err != nil {
 		return fmt.Errorf("consume upload: %w", err)
 	}
-	return c.loop(ctx, deliveries, func(body []byte) error {
+	return c.loop(ctx, deliveries, func(msgCtx context.Context, body []byte) error {
 		var ev models.AvatarUploadEvent
 		if err := json.Unmarshal(body, &ev); err != nil {
 			return fmt.Errorf("unmarshal upload event: %w", err)
 		}
-		return handler(ctx, ev)
+		return handler(msgCtx, ev)
 	})
 }
 
@@ -217,19 +232,19 @@ func (c *rabbitConsumer) ConsumeDelete(ctx context.Context, handler func(context
 	if err != nil {
 		return fmt.Errorf("consume delete: %w", err)
 	}
-	return c.loop(ctx, deliveries, func(body []byte) error {
+	return c.loop(ctx, deliveries, func(msgCtx context.Context, body []byte) error {
 		var ev models.AvatarDeleteEvent
 		if err := json.Unmarshal(body, &ev); err != nil {
 			return fmt.Errorf("unmarshal delete event: %w", err)
 		}
-		return handler(ctx, ev)
+		return handler(msgCtx, ev)
 	})
 }
 
 func (c *rabbitConsumer) loop(
 	ctx context.Context,
 	deliveries <-chan amqp.Delivery,
-	handle func([]byte) error,
+	handle func(context.Context, []byte) error,
 ) error {
 	for {
 		select {
@@ -239,8 +254,18 @@ func (c *rabbitConsumer) loop(
 			if !ok {
 				return errors.New("rabbit deliveries channel closed")
 			}
-			if err := handle(d.Body); err != nil {
-				c.logger.Error("worker: event processing failed",
+
+			// Extract W3C trace context from AMQP headers.
+			carrier := propagation.MapCarrier{}
+			for k, v := range d.Headers {
+				if s, ok := v.(string); ok {
+					carrier[k] = s
+				}
+			}
+			msgCtx := otel.GetTextMapPropagator().Extract(ctx, carrier)
+
+			if err := handle(msgCtx, d.Body); err != nil {
+				c.logger.ErrorContext(msgCtx, "worker: event processing failed",
 					slog.String("message_id", d.MessageId),
 					slog.Any("error", err))
 				_ = d.Nack(false, false)
