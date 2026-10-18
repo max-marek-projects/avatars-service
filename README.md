@@ -71,25 +71,42 @@ The project is packaged as a Helm chart located in `deploy/helm/avatars-service`
 - Nginx Ingress Controller installed (`ingress-nginx`). If using Rancher Desktop, disable the default Traefik controller.
 - Prometheus Operator CRDs installed (for `ServiceMonitor`).
 
-### Deployment Steps
+### Vault Integration
 
-1. **Install infrastructure dependencies** (PostgreSQL, MinIO, RabbitMQ, Jaeger, Vault) using Bitnami OCI charts
-2. **Install Prometheus CRDs** (required for ServiceMonitor)
-3. **Build and deploy the application**
+Vault secrets are the source of truth for `DATABASE_URI`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, and `RABBIT_URL`. They are synced into a Kubernetes Secret by [Vault Secrets Operator](https://developer.hashicorp.com/vault/docs/platform/k8s/vso).
+
+#### First-time setup (fresh cluster)
+
+```bash
+# 1. Install everything except the application
+make infra
+
+# 2. Wait for Vault, then initialize & unseal it
+make vault-wait
+make vault-init       # creates vault-init.json (keep it local, do NOT commit)
+make vault-unseal
+
+# 3. Enable Kubernetes auth, write policies/roles, and store secrets in Vault
+make vault-configure
+
+# 4. Build and deploy the application
+make app-deploy
+```
+
+Or as a single command
 
 ```bash
 make kuber
-make vault-init
 ```
 
-4. **Configure hosts**:
-   Add the following line to `C:\Windows\System32\drivers\etc\hosts` (or `/etc/hosts`):
+**Configure hosts**:
+Add the following line to `C:\Windows\System32\drivers\etc\hosts` (or `/etc/hosts`):
 
 ```text
 127.0.0.1 avatars.example.com
 ```
 
-5. Verify: `http://avatars.example.com/health`
+1. Verify: `http://avatars.example.com/health`
 
 ## API
 
@@ -185,7 +202,22 @@ internal/
   worker/         # event processing (resize, delete)
 migrations/       # SQL migrations
 deploy/helm/      # Kubernetes Helm chart
+deploy/vault/     # Kubernetes Vault chart
 docker/           # compose, Dockerfile, observability configs
+docs/             # OpenAPI swagger
+```
+
+## API Documentation (Swagger UI)
+
+Interactive Swagger UI is served by the application itself:
+
+- **Kubernetes:** http://avatars.example.com/swagger/index.html
+- **Local:** http://localhost:8080/swagger/index.html
+
+**Generate the spec** (after changing handler annotations):
+
+```bash
+make swagger
 ```
 
 ## License

@@ -174,6 +174,26 @@ func orNA(s string) string {
 	return s
 }
 
+// @title           Avatars Service API
+// @version         1.0.0
+// @description     Backend for managing user avatars: upload, storage in S3, async thumbnails, delivery.
+// @termsOfService  http://swagger.io/terms/
+//
+// @contact.name    GophProfile
+// @contact.email   dev@gophprofile.local
+//
+// @license.name    MIT
+// @license.url     https://opensource.org/licenses/MIT
+//
+// @host            avatars.example.com
+// @BasePath        /
+//
+// @schemes         http https
+//
+// @securityDefinitions.apikey  XUserID
+// @in                          header
+// @name                        X-User-ID
+// @description                 Authenticated user ID (owner of the avatar).
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)

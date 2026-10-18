@@ -2,17 +2,31 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "avatars-service.fullname" . }}
+  name: {{ include "avatars-service.fullname" . }}-server
   labels:
     {{- include "avatars-service.labels" . | nindent 4 }}
 spec:
   selector:
     matchLabels:
       {{- include "avatars-service.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
   endpoints:
     - port: http
       path: /metrics
       interval: {{ .Values.serviceMonitor.interval }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "avatars-service.fullname" . }}-worker
+  labels:
+    {{- include "avatars-service.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "avatars-service.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  endpoints:
     - port: metrics
       path: /metrics
       interval: {{ .Values.serviceMonitor.interval }}

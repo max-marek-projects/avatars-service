@@ -11,7 +11,15 @@ import (
 	"github.com/max-marek-projects/avatars-service/internal/models"
 )
 
-// Health handles GET /health.
+// Health godoc
+//
+//	@Summary		Liveness / readiness probe
+//	@Description	Checks PostgreSQL, S3/MinIO, RabbitMQ. Returns 200 if all are ok, 503 otherwise.
+//	@Tags			Health
+//	@Produce		json
+//	@Success		200	{object}	models.HealthStatus
+//	@Failure		503	{object}	models.HealthStatus
+//	@Router			/health [get]
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	status := h.service.Health(r.Context())
 	code := http.StatusOK
@@ -21,7 +29,20 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, code, status)
 }
 
-// UploadAvatar handles POST /api/v1/avatars.
+// UploadAvatar godoc
+//
+//	@Summary		Upload a new avatar
+//	@Description	Accepts multipart/form-data with a single "file" field. Allowed MIME: image/jpeg, image/png, image/webp. Size limit: MAX_FILE_SIZE.
+//	@Tags			Avatars
+//	@Accept			multipart/form-data
+//	@Produce		json
+//	@Security		XUserID
+//	@Param			file	formData	file	true	"Avatar image file"
+//	@Success		201		{object}	models.UploadAvatarResponse
+//	@Failure		400		{object}	models.ErrorResponse
+//	@Failure		413		{object}	models.ErrorResponse
+//	@Failure		503		{object}	models.ErrorResponse
+//	@Router			/api/v1/avatars [post]
 func (h *Handler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
@@ -63,7 +84,17 @@ func (h *Handler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetAvatarByID handles GET /api/v1/avatars/{avatar_id}.
+// GetAvatarByID godoc
+//
+//	@Summary		Download avatar by ID
+//	@Description	Returns the original avatar image as binary.
+//	@Tags			Avatars
+//	@Produce		image/jpeg,image/png,image/webp
+//	@Param			avatar_id	path	string	true	"Avatar UUID"
+//	@Success		200			{file}	binary
+//	@Failure		400			{object}	models.ErrorResponse
+//	@Failure		404			{object}	models.ErrorResponse
+//	@Router			/api/v1/avatars/{avatar_id} [get]
 func (h *Handler) GetAvatarByID(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "avatar_id"))
 	if err != nil {
@@ -89,7 +120,16 @@ func (h *Handler) GetAvatarByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetActiveAvatar handles GET /api/v1/users/{user_id}/avatar.
+// GetActiveAvatar godoc
+//
+//	@Summary		Active avatar of the user
+//	@Description	Returns the freshest avatar or a placeholder. Binary image.
+//	@Tags			Users
+//	@Produce		image/jpeg,image/png,image/webp
+//	@Param			user_id	path	string	true	"User ID"
+//	@Success		200		{file}	binary
+//	@Failure		404		{object}	models.ErrorResponse
+//	@Router			/api/v1/users/{user_id}/avatar [get]
 func (h *Handler) GetActiveAvatar(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "user_id")
 	if userID == "" {
@@ -110,7 +150,17 @@ func (h *Handler) GetActiveAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetAvatarMetadata handles GET /api/v1/avatars/{avatar_id}/metadata.
+// GetAvatarMetadata godoc
+//
+//	@Summary		Avatar metadata
+//	@Description	Returns JSON metadata without touching S3.
+//	@Tags			Avatars
+//	@Produce		json
+//	@Param			avatar_id	path	string	true	"Avatar UUID"
+//	@Success		200			{object}	models.AvatarMetadataResponse
+//	@Failure		400			{object}	models.ErrorResponse
+//	@Failure		404			{object}	models.ErrorResponse
+//	@Router			/api/v1/avatars/{avatar_id}/metadata [get]
 func (h *Handler) GetAvatarMetadata(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "avatar_id"))
 	if err != nil {
@@ -125,7 +175,18 @@ func (h *Handler) GetAvatarMetadata(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toMetadataResponse(avatar))
 }
 
-// DeleteAvatar handles DELETE /api/v1/avatars/{avatar_id}.
+// DeleteAvatar godoc
+//
+//	@Summary		Delete avatar (owner only)
+//	@Description	Soft-delete. Verifies X-User-ID matches owner.
+//	@Tags			Avatars
+//	@Security		XUserID
+//	@Param			avatar_id	path	string	true	"Avatar UUID"
+//	@Success		204
+//	@Failure		400	{object}	models.ErrorResponse
+//	@Failure		403	{object}	models.ErrorResponse
+//	@Failure		404	{object}	models.ErrorResponse
+//	@Router			/api/v1/avatars/{avatar_id} [delete]
 func (h *Handler) DeleteAvatar(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
@@ -144,7 +205,16 @@ func (h *Handler) DeleteAvatar(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// DeleteActiveUserAvatar handles DELETE /api/v1/users/{user_id}/avatar.
+// DeleteActiveUserAvatar godoc
+//
+//	@Summary		Delete active avatar of the user
+//	@Tags			Users
+//	@Security		XUserID
+//	@Param			user_id	path	string	true	"User ID"
+//	@Success		204
+//	@Failure		400	{object}	models.ErrorResponse
+//	@Failure		404	{object}	models.ErrorResponse
+//	@Router			/api/v1/users/{user_id}/avatar [delete]
 func (h *Handler) DeleteActiveUserAvatar(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
@@ -158,7 +228,16 @@ func (h *Handler) DeleteActiveUserAvatar(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ListUserAvatars handles GET /api/v1/users/{user_id}/avatars.
+// ListUserAvatars godoc
+//
+//	@Summary		List user avatars
+//	@Description	Returns all non-deleted avatars of the user.
+//	@Tags			Users
+//	@Produce		json
+//	@Param			user_id	path	string	true	"User ID"
+//	@Success		200		{array}	models.AvatarMetadataResponse
+//	@Failure		500		{object}	models.ErrorResponse
+//	@Router			/api/v1/users/{user_id}/avatars [get]
 func (h *Handler) ListUserAvatars(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "user_id")
 	if userID == "" {

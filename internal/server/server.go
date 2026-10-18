@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,10 +17,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
+	_ "github.com/max-marek-projects/avatars-service/docs" // swagger spec (blank import)
 	"github.com/max-marek-projects/avatars-service/internal/handlers"
 	"github.com/max-marek-projects/avatars-service/internal/middlewares"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/riandyrn/otelchi"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 )
 
 // server wraps an http.server with a chi router and the avatar HTTP handler.
@@ -97,9 +100,17 @@ func NewRouter(h *handlers.Handler, staticDir string, logger *slog.Logger) chi.R
 
 	// Rate limit per real client IP: 100 req/min.
 	r.Use(httprate.LimitBy(100, 1*time.Minute, func(r *http.Request) (string, error) {
+		if r.URL.Path == "/health" || r.URL.Path == "/metrics" {
+			return "internal", nil
+		}
+
 		ip := middleware.GetClientIP(r.Context())
 		if ip == "" {
-			return "", fmt.Errorf("no client IP resolved")
+			host, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil {
+				return r.RemoteAddr, nil
+			}
+			return host, nil
 		}
 		return httprate.CanonicalizeIP(ip), nil
 	}))
@@ -120,6 +131,7 @@ func NewRouter(h *handlers.Handler, staticDir string, logger *slog.Logger) chi.R
 
 	r.Get("/health", h.Health)
 	r.Handle("/metrics", promhttp.Handler())
+	r.Get("/swagger/*", httpSwagger.WrapHandler)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Route("/avatars", func(r chi.Router) {

@@ -26,9 +26,14 @@ S3_ACCESS_KEY ?= minio
 S3_SECRET_KEY ?= minio12345
 S3_BUCKET ?= avatars
 
-.PHONY: kuber vault-init
+.PHONY: kuber infra vault-wait vault-init vault-unseal vault-configure app-deploy
 
-kuber:
+# Full end-to-end pipeline
+kuber: infra vault-wait vault-init vault-unseal vault-configure app-deploy
+	@echo "✅ All components deployed and configured"
+
+# --- Infrastructure ---
+infra:
 	@echo "=== Installing Infrastructure ==="
 	helm upgrade --install postgres oci://registry-1.docker.io/bitnamicharts/postgresql \
 		--set fullnameOverride=postgres \
@@ -56,17 +61,24 @@ kuber:
 		--set global.security.allowInsecureImages=true
 
 	helm upgrade --install jaeger jaegertracing/jaeger
-	
+
 	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 	helm repo update
-	helm upgrade --install prometheus-crds prometheus-community/prometheus-operator-crds
+	helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+		-n monitoring --create-namespace \
+		--set grafana.adminPassword=admin \
+		--set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+		--set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
+		--set prometheus.prometheusSpec.resources.requests.memory=256Mi \
+		--set prometheus.prometheusSpec.resources.requests.cpu=100m \
+		--set prometheus.prometheusSpec.resources.limits.memory=512Mi \
+		--set alertmanager.enabled=true \
+		--wait --timeout 10m
 
-	@echo "=== Installing Vault & VSO ==="
 	helm upgrade --install vault oci://registry-1.docker.io/bitnamicharts/vault \
 		-n vault --create-namespace \
 		-f deploy/vault/vault-values.yaml
 
-	# CRDs
 	kubectl apply -f https://raw.githubusercontent.com/hashicorp/vault-secrets-operator/main/config/crd/bases/secrets.hashicorp.com_vaultauths.yaml
 	kubectl apply -f https://raw.githubusercontent.com/hashicorp/vault-secrets-operator/main/config/crd/bases/secrets.hashicorp.com_vaultconnections.yaml
 	kubectl apply -f https://raw.githubusercontent.com/hashicorp/vault-secrets-operator/main/config/crd/bases/secrets.hashicorp.com_vaultstaticsecrets.yaml
@@ -81,32 +93,85 @@ kuber:
 
 	kubectl apply -f deploy/vault/vault-auth.yaml
 
-	@echo "=== Building App ==="
-	docker build --progress=plain -t avatars-service:dev -f docker/Dockerfile .
+# --- Wait for Vault pod ---
+vault-wait:
+	@echo "=== Waiting for Vault pod ==="
+	kubectl wait --for=create pod/vault-server-0 -n vault --timeout=120s
+	kubectl wait --for=jsonpath='{.status.phase}'=Running pod/vault-server-0 -n vault --timeout=120s
 
-	@echo "=== Waiting for VSO to create secrets ==="
-	kubectl wait --for=create secret/my-app-avatars-service-secrets --timeout=60s || true
-
-	@echo "=== Deploying App ==="
-	helm upgrade --install my-app deploy/helm/avatars-service
-
+# --- Init Vault (idempotent) ---
 vault-init:
 	@echo "=== Initializing Vault ==="
-	@if kubectl exec -n vault vault-server-0 -- vault status 2>/dev/null | grep -q "Initialized.*true"; then \
-		echo "✅ Vault is already initialized. Skipping init."; \
+	@if [ -f vault-init.json ]; then \
+		echo "✅ vault-init.json already exists, skipping"; \
+	elif kubectl exec -n vault vault-server-0 -- vault status 2>/dev/null | grep -q "Initialized.*true"; then \
+		echo "❌ Vault is already initialized but vault-init.json is missing."; \
+		echo "   Restore the file, or reset Vault with 'make reset-vault'."; \
+		exit 1; \
 	else \
 		kubectl exec -n vault vault-server-0 -- vault operator init \
-			-key-shares=1 -key-threshold=1 \
-			-format=json > vault-init.json; \
-		echo "✅ Vault initialized. Check vault-init.json for unseal key and root token."; \
+			-key-shares=1 -key-threshold=1 -format=json > vault-init.json; \
+		echo "✅ Vault initialized, credentials saved to vault-init.json"; \
 	fi
-	@echo "⚠️  Don't forget to unseal Vault and write secrets to it (see README)."
 
+# --- Unseal Vault (idempotent) ---
+vault-unseal:
+	@echo "=== Unsealing Vault ==="
+	@test -f vault-init.json || (echo "❌ vault-init.json missing. Run 'make vault-init'."; exit 1)
+	@if kubectl exec -n vault vault-server-0 -- vault status 2>/dev/null | grep -q "Sealed.*false"; then \
+		echo "✅ Already unsealed, skipping"; \
+	else \
+		UNSEAL_KEY=$$(tr -d '\n ' < vault-init.json | grep -o '"unseal_keys_b64":\["[^"]*"' | cut -d'"' -f4); \
+		if [ -z "$$UNSEAL_KEY" ]; then echo "❌ Could not parse unseal key"; exit 1; fi; \
+		kubectl exec -n vault vault-server-0 -- vault operator unseal "$$UNSEAL_KEY" >/dev/null; \
+		echo "✅ Vault unsealed"; \
+	fi
+
+# --- Configure Vault (secrets, auth, roles) ---
+vault-configure:
+	@echo "=== Configuring Vault ==="
+	@bash scripts/vault-configure.sh
+
+# --- Build and deploy the application ---
+app-deploy:
+	@echo "=== Building app image ==="
+	docker context use default
+	docker build --progress=plain -t avatars-service:dev -f docker/Dockerfile .
+
+	@echo "=== Deploying Helm chart ==="
+	helm upgrade --install my-app deploy/helm/avatars-service
+
+	@echo "=== Waiting for VSO to sync secrets (up to 60s) ==="
+	@for i in $$(seq 1 30); do \
+		if kubectl get secret my-app-avatars-service-secrets >/dev/null 2>&1; then \
+			echo "✅ Secret created by VSO"; exit 0; \
+		fi; \
+		sleep 2; \
+	done; \
+	echo "⚠️  Secret not ready yet, pods may retry"; exit 0
+
+# --- Full teardown ---
+reset:
+	helm uninstall my-app || true
+	helm uninstall vault -n vault || true
+	kubectl delete pvc -n vault -l app.kubernetes.io/instance=vault --ignore-not-found
+	rm -f vault-init.json
 
 # ========== GENERATE ==========
 
 mocks: # generate all mocks
 	go generate ./...
+
+.PHONY: swagger swagger-serve
+
+swagger:
+	@echo "=== Generating Swagger docs ==="
+	swag init -g cmd/server/main.go -o docs --parseDependency --parseInternal --parseDepth 2
+	@echo "✅ docs/swagger.yaml and docs/swagger.json generated"
+
+swagger-serve:
+	@echo "=== Serving Swagger UI at http://localhost:8080/swagger ==="
+	swag serve --dir=./docs --port=8090
 
 # ========== TESTING AND LINTING ==========
 
