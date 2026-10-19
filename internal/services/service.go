@@ -10,12 +10,14 @@ import (
 	"log/slog"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/max-marek-projects/avatars-service/internal/metrics"
 	"github.com/max-marek-projects/avatars-service/internal/models"
 	"github.com/max-marek-projects/avatars-service/internal/repository"
 	"github.com/max-marek-projects/avatars-service/internal/tracing"
+	"github.com/sony/gobreaker"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -39,6 +41,8 @@ type service struct {
 	publisher Publisher
 	logger    *slog.Logger
 	config    Config
+	s3CB      *gobreaker.CircuitBreaker
+	dbCB      *gobreaker.CircuitBreaker
 }
 
 // NewService builds a service instance and applies sane defaults.
@@ -67,13 +71,46 @@ func NewService(
 	if len(cfg.AllowedMimeTypes) == 0 {
 		cfg.AllowedMimeTypes = []string{"image/jpeg", "image/png", "image/webp"}
 	}
+
+	cbSettings := gobreaker.Settings{
+		Timeout: 10 * time.Second,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 5
+		},
+	}
+
 	return &service{
 		storage:   storage,
 		objects:   objects,
 		publisher: publisher,
 		logger:    logger,
 		config:    cfg,
+		s3CB:      gobreaker.NewCircuitBreaker(cbSettings),
+		dbCB:      gobreaker.NewCircuitBreaker(cbSettings),
 	}, nil
+}
+
+// ---------- Circuit Breaker helpers ----------
+
+// withS3CB executes fn within the S3 circuit breaker.
+func (s *service) withS3CB(fn func() error) error {
+	_, err := s.s3CB.Execute(func() (interface{}, error) {
+		return nil, fn()
+	})
+	return err
+}
+
+// withDBCB executes fn within the DB circuit breaker.
+func (s *service) withDBCB(fn func() error) error {
+	_, err := s.dbCB.Execute(func() (interface{}, error) {
+		return nil, fn()
+	})
+	return err
+}
+
+// isCBOpen reports whether the error is caused by an open circuit breaker.
+func isCBOpen(err error) bool {
+	return errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests)
 }
 
 // ---------- Avatar upload ----------
@@ -130,13 +167,18 @@ func (s *service) UploadAvatar(
 	key := s.buildOriginalKey(userID, id, fileName)
 	span.SetAttributes(attribute.String("avatar.id", id.String()), attribute.String("s3.key", key))
 
-	// 1. Upload original to S3.
-	if err := s.objects.Upload(ctx, key, r, size, contentType); err != nil {
-		tracing.RecordError(span, err)
-		return nil, fmt.Errorf("failed to upload file to S3: %w", err)
+	// 1. Upload original to S3 (with Circuit Breaker).
+	if cbErr := s.withS3CB(func() error {
+		return s.objects.Upload(ctx, key, r, size, contentType)
+	}); cbErr != nil {
+		tracing.RecordError(span, cbErr)
+		if isCBOpen(cbErr) {
+			return nil, ErrServiceUnavailable
+		}
+		return nil, fmt.Errorf("failed to upload file to S3: %w", cbErr)
 	}
 
-	// 2. Persist metadata.
+	// 2. Persist metadata (with Circuit Breaker).
 	avatar := &models.Avatar{
 		ID:               id,
 		UserID:           userID,
@@ -148,21 +190,26 @@ func (s *service) UploadAvatar(
 		UploadStatus:     models.UploadStatusUploaded,
 		ProcessingStatus: models.ProcessingStatusPending,
 	}
-	if err := s.storage.CreateAvatar(ctx, avatar); err != nil {
+	if cbErr := s.withDBCB(func() error {
+		return s.storage.CreateAvatar(ctx, avatar)
+	}); cbErr != nil {
 		// Rollback the S3 upload: we do not want orphan files.
 		if delErr := s.objects.Delete(ctx, key); delErr != nil {
 			s.logger.ErrorContext(ctx, "failed to rollback S3 upload",
 				slog.String("key", key),
 				slog.Any("error", delErr))
 		}
-		tracing.RecordError(span, err)
-		if errors.Is(err, repository.ErrAlreadyInStorage) {
+		tracing.RecordError(span, cbErr)
+		if isCBOpen(cbErr) {
+			return nil, ErrServiceUnavailable
+		}
+		if errors.Is(cbErr, repository.ErrAlreadyInStorage) {
 			return nil, ErrAvatarConflict
 		}
-		if errors.Is(err, repository.ErrInvalidArgument) {
+		if errors.Is(cbErr, repository.ErrInvalidArgument) {
 			return nil, ErrInvalidArgument
 		}
-		return nil, fmt.Errorf("failed to store avatar metadata: %w", err)
+		return nil, fmt.Errorf("failed to store avatar metadata: %w", cbErr)
 	}
 
 	// 3. Publish event for the worker.
@@ -198,21 +245,37 @@ func (s *service) GetAvatarByID(ctx context.Context, id uuid.UUID) (*models.Avat
 	if id == uuid.Nil {
 		return nil, nil, fmt.Errorf("empty avatar id: %w", ErrInvalidArgument)
 	}
-	avatar, err := s.storage.GetAvatarByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, repository.ErrAvatarNotFound) {
+
+	var avatar *models.Avatar
+	if cbErr := s.withDBCB(func() error {
+		var err error
+		avatar, err = s.storage.GetAvatarByID(ctx, id)
+		return err
+	}); cbErr != nil {
+		if isCBOpen(cbErr) {
+			return nil, nil, ErrServiceUnavailable
+		}
+		if errors.Is(cbErr, repository.ErrAvatarNotFound) {
 			return nil, nil, ErrAvatarNotFound
 		}
-		if errors.Is(err, repository.ErrInvalidArgument) {
+		if errors.Is(cbErr, repository.ErrInvalidArgument) {
 			return nil, nil, ErrInvalidArgument
 		}
-		tracing.RecordError(span, err)
-		return nil, nil, fmt.Errorf("failed to get avatar: %w", err)
+		tracing.RecordError(span, cbErr)
+		return nil, nil, fmt.Errorf("failed to get avatar: %w", cbErr)
 	}
-	rc, err := s.objects.Download(ctx, avatar.S3Key)
-	if err != nil {
-		tracing.RecordError(span, err)
-		return nil, nil, fmt.Errorf("failed to download avatar: %w", err)
+
+	var rc io.ReadCloser
+	if cbErr := s.withS3CB(func() error {
+		var err error
+		rc, err = s.objects.Download(ctx, avatar.S3Key)
+		return err
+	}); cbErr != nil {
+		tracing.RecordError(span, cbErr)
+		if isCBOpen(cbErr) {
+			return nil, nil, ErrServiceUnavailable
+		}
+		return nil, nil, fmt.Errorf("failed to download avatar: %w", cbErr)
 	}
 	return avatar, rc, nil
 }
@@ -229,19 +292,37 @@ func (s *service) GetActiveAvatar(ctx context.Context, userID string) (*models.A
 	if userID == "" {
 		return nil, nil, fmt.Errorf("empty user id: %w", ErrInvalidArgument)
 	}
-	avatar, err := s.storage.GetActiveAvatarByUserID(ctx, userID)
-	if err != nil {
-		if errors.Is(err, repository.ErrAvatarNotFound) {
+
+	var avatar *models.Avatar
+	if cbErr := s.withDBCB(func() error {
+		var err error
+		avatar, err = s.storage.GetActiveAvatarByUserID(ctx, userID)
+		return err
+	}); cbErr != nil {
+		if isCBOpen(cbErr) {
+			return nil, nil, ErrServiceUnavailable
+		}
+		if errors.Is(cbErr, repository.ErrAvatarNotFound) {
 			return s.placeholder(ctx)
 		}
-		if errors.Is(err, repository.ErrInvalidArgument) {
+		if errors.Is(cbErr, repository.ErrInvalidArgument) {
 			return nil, nil, ErrInvalidArgument
 		}
-		return nil, nil, fmt.Errorf("failed to get active avatar: %w", err)
+		tracing.RecordError(span, cbErr)
+		return nil, nil, fmt.Errorf("failed to get active avatar: %w", cbErr)
 	}
-	rc, err := s.objects.Download(ctx, avatar.S3Key)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to download avatar: %w", err)
+
+	var rc io.ReadCloser
+	if cbErr := s.withS3CB(func() error {
+		var err error
+		rc, err = s.objects.Download(ctx, avatar.S3Key)
+		return err
+	}); cbErr != nil {
+		tracing.RecordError(span, cbErr)
+		if isCBOpen(cbErr) {
+			return nil, nil, ErrServiceUnavailable
+		}
+		return nil, nil, fmt.Errorf("failed to download avatar: %w", cbErr)
 	}
 	return avatar, rc, nil
 }
@@ -256,15 +337,24 @@ func (s *service) GetAvatarMetadata(ctx context.Context, id uuid.UUID) (*models.
 	if id == uuid.Nil {
 		return nil, fmt.Errorf("empty avatar id: %w", ErrInvalidArgument)
 	}
-	avatar, err := s.storage.GetAvatarByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, repository.ErrAvatarNotFound) {
+
+	var avatar *models.Avatar
+	if cbErr := s.withDBCB(func() error {
+		var err error
+		avatar, err = s.storage.GetAvatarByID(ctx, id)
+		return err
+	}); cbErr != nil {
+		if isCBOpen(cbErr) {
+			return nil, ErrServiceUnavailable
+		}
+		if errors.Is(cbErr, repository.ErrAvatarNotFound) {
 			return nil, ErrAvatarNotFound
 		}
-		if errors.Is(err, repository.ErrInvalidArgument) {
+		if errors.Is(cbErr, repository.ErrInvalidArgument) {
 			return nil, ErrInvalidArgument
 		}
-		return nil, fmt.Errorf("failed to get avatar metadata: %w", err)
+		tracing.RecordError(span, cbErr)
+		return nil, fmt.Errorf("failed to get avatar metadata: %w", cbErr)
 	}
 	return avatar, nil
 }
@@ -279,12 +369,21 @@ func (s *service) ListUserAvatars(ctx context.Context, userID string) ([]models.
 	if userID == "" {
 		return nil, fmt.Errorf("empty user id: %w", ErrInvalidArgument)
 	}
-	avatars, err := s.storage.ListAvatarsByUserID(ctx, userID)
-	if err != nil {
-		if errors.Is(err, repository.ErrInvalidArgument) {
+
+	var avatars []models.Avatar
+	if cbErr := s.withDBCB(func() error {
+		var err error
+		avatars, err = s.storage.ListAvatarsByUserID(ctx, userID)
+		return err
+	}); cbErr != nil {
+		if isCBOpen(cbErr) {
+			return nil, ErrServiceUnavailable
+		}
+		if errors.Is(cbErr, repository.ErrInvalidArgument) {
 			return nil, ErrInvalidArgument
 		}
-		return nil, fmt.Errorf("failed to list avatars: %w", err)
+		tracing.RecordError(span, cbErr)
+		return nil, fmt.Errorf("failed to list avatars: %w", cbErr)
 	}
 	span.SetAttributes(attribute.Int("avatars.count", len(avatars)))
 	return avatars, nil
@@ -315,27 +414,39 @@ func (s *service) DeleteAvatar(ctx context.Context, id uuid.UUID, userID string)
 		return fmt.Errorf("empty user id: %w", ErrInvalidArgument)
 	}
 
-	avatar, err := s.storage.GetAvatarByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, repository.ErrAvatarNotFound) {
+	var avatar *models.Avatar
+	if cbErr := s.withDBCB(func() error {
+		var err error
+		avatar, err = s.storage.GetAvatarByID(ctx, id)
+		return err
+	}); cbErr != nil {
+		if isCBOpen(cbErr) {
+			return ErrServiceUnavailable
+		}
+		if errors.Is(cbErr, repository.ErrAvatarNotFound) {
 			return ErrAvatarNotFound
 		}
-		tracing.RecordError(span, err)
-		return fmt.Errorf("failed to fetch avatar: %w", err)
+		tracing.RecordError(span, cbErr)
+		return fmt.Errorf("failed to fetch avatar: %w", cbErr)
 	}
 	if avatar.UserID != userID {
 		return ErrForbidden
 	}
 
-	if err := s.storage.SoftDeleteAvatar(ctx, id, userID); err != nil {
-		if errors.Is(err, repository.ErrAvatarNotFound) {
+	if cbErr := s.withDBCB(func() error {
+		return s.storage.SoftDeleteAvatar(ctx, id, userID)
+	}); cbErr != nil {
+		if isCBOpen(cbErr) {
+			return ErrServiceUnavailable
+		}
+		if errors.Is(cbErr, repository.ErrAvatarNotFound) {
 			return ErrAvatarNotFound
 		}
-		if errors.Is(err, repository.ErrNoChanges) {
+		if errors.Is(cbErr, repository.ErrNoChanges) {
 			return ErrNoChanges
 		}
-		tracing.RecordError(span, err)
-		return fmt.Errorf("failed to soft-delete avatar: %w", err)
+		tracing.RecordError(span, cbErr)
+		return fmt.Errorf("failed to soft-delete avatar: %w", cbErr)
 	}
 
 	s.publishDelete(ctx, avatar)
@@ -359,23 +470,37 @@ func (s *service) DeleteActiveUserAvatar(ctx context.Context, userID string) (er
 	if userID == "" {
 		return fmt.Errorf("empty user id: %w", ErrInvalidArgument)
 	}
-	avatar, err := s.storage.GetActiveAvatarByUserID(ctx, userID)
-	if err != nil {
-		if errors.Is(err, repository.ErrAvatarNotFound) {
+
+	var avatar *models.Avatar
+	if cbErr := s.withDBCB(func() error {
+		var err error
+		avatar, err = s.storage.GetActiveAvatarByUserID(ctx, userID)
+		return err
+	}); cbErr != nil {
+		if isCBOpen(cbErr) {
+			return ErrServiceUnavailable
+		}
+		if errors.Is(cbErr, repository.ErrAvatarNotFound) {
 			return ErrAvatarNotFound
 		}
-		tracing.RecordError(span, err)
-		return fmt.Errorf("failed to fetch active avatar: %w", err)
+		tracing.RecordError(span, cbErr)
+		return fmt.Errorf("failed to fetch active avatar: %w", cbErr)
 	}
-	if err := s.storage.SoftDeleteActiveUserAvatar(ctx, userID); err != nil {
-		if errors.Is(err, repository.ErrAvatarNotFound) {
+
+	if cbErr := s.withDBCB(func() error {
+		return s.storage.SoftDeleteActiveUserAvatar(ctx, userID)
+	}); cbErr != nil {
+		if isCBOpen(cbErr) {
+			return ErrServiceUnavailable
+		}
+		if errors.Is(cbErr, repository.ErrAvatarNotFound) {
 			return ErrAvatarNotFound
 		}
-		if errors.Is(err, repository.ErrNoChanges) {
+		if errors.Is(cbErr, repository.ErrNoChanges) {
 			return ErrNoChanges
 		}
-		tracing.RecordError(span, err)
-		return fmt.Errorf("failed to soft-delete active avatar: %w", err)
+		tracing.RecordError(span, cbErr)
+		return fmt.Errorf("failed to soft-delete active avatar: %w", cbErr)
 	}
 	s.publishDelete(ctx, avatar)
 	return nil

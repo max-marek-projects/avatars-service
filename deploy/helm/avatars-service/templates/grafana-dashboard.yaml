@@ -1,0 +1,53 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "avatars-service.fullname" . }}-dashboard
+  labels:
+    {{- include "avatars-service.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  avatars-service.json: |-
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "HTTP RPS by route",
+          "targets": [{"expr": "sum(rate(http_requests_total[5m])) by (route)"}],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+        },
+        {
+          "type": "timeseries",
+          "title": "HTTP latency p95 (s)",
+          "targets": [{"expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, route))"}],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+        },
+        {
+          "type": "timeseries",
+          "title": "HTTP 5xx rate",
+          "targets": [{"expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m]))"}],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+        },
+        {
+          "type": "timeseries",
+          "title": "Avatar uploads by status",
+          "targets": [{"expr": "sum(rate(avatar_uploads_total[5m])) by (status)"}],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+        },
+        {
+          "type": "timeseries",
+          "title": "Worker processing p95 (s)",
+          "targets": [{"expr": "histogram_quantile(0.95, sum(rate(avatar_processing_duration_seconds_bucket[5m])) by (le, stage))"}],
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "tags": ["avatars-service"],
+      "time": {"from": "now-30m", "to": "now"},
+      "title": "Avatars Service",
+      "uid": "avatars-service"
+    }
+{{- end }}
