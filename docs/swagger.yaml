@@ -1,0 +1,310 @@
+basePath: /
+definitions:
+  github_com_max-marek-projects_avatars-service_internal_models.AvatarMetadataResponse:
+    properties:
+      created_at:
+        type: string
+      dimensions:
+        $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.Dimensions'
+      file_name:
+        type: string
+      id:
+        type: string
+      mime_type:
+        type: string
+      size:
+        type: integer
+      thumbnails:
+        items:
+          $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ThumbnailInfo'
+        type: array
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
+  github_com_max-marek-projects_avatars-service_internal_models.ComponentHealth:
+    properties:
+      error:
+        type: string
+      status:
+        type: string
+    type: object
+  github_com_max-marek-projects_avatars-service_internal_models.Dimensions:
+    properties:
+      height:
+        type: integer
+      width:
+        type: integer
+    type: object
+  github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse:
+    properties:
+      details:
+        type: string
+      error:
+        type: string
+    type: object
+  github_com_max-marek-projects_avatars-service_internal_models.HealthStatus:
+    properties:
+      details:
+        additionalProperties:
+          $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ComponentHealth'
+        type: object
+      status:
+        type: string
+    type: object
+  github_com_max-marek-projects_avatars-service_internal_models.ThumbnailInfo:
+    properties:
+      size:
+        type: string
+      url:
+        type: string
+    type: object
+  github_com_max-marek-projects_avatars-service_internal_models.UploadAvatarResponse:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      status:
+        type: string
+      url:
+        type: string
+      user_id:
+        type: string
+    type: object
+host: avatars.example.com
+info:
+  contact:
+    email: dev@gophprofile.local
+    name: GophProfile
+  description: 'Backend for managing user avatars: upload, storage in S3, async thumbnails,
+    delivery.'
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: Avatars Service API
+  version: 1.0.0
+paths:
+  /api/v1/avatars:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 'Accepts multipart/form-data with a single "file" field. Allowed
+        MIME: image/jpeg, image/png, image/webp. Size limit: MAX_FILE_SIZE.'
+      parameters:
+      - description: Avatar image file
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.UploadAvatarResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+      security:
+      - XUserID: []
+      summary: Upload a new avatar
+      tags:
+      - Avatars
+  /api/v1/avatars/{avatar_id}:
+    delete:
+      description: Soft-delete. Verifies X-User-ID matches owner.
+      parameters:
+      - description: Avatar UUID
+        in: path
+        name: avatar_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+      security:
+      - XUserID: []
+      summary: Delete avatar (owner only)
+      tags:
+      - Avatars
+    get:
+      description: Returns the original avatar image as binary.
+      parameters:
+      - description: Avatar UUID
+        in: path
+        name: avatar_id
+        required: true
+        type: string
+      produces:
+      - image/jpeg
+      - image/png
+      - image/webp
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+      summary: Download avatar by ID
+      tags:
+      - Avatars
+  /api/v1/avatars/{avatar_id}/metadata:
+    get:
+      description: Returns JSON metadata without touching S3.
+      parameters:
+      - description: Avatar UUID
+        in: path
+        name: avatar_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.AvatarMetadataResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+      summary: Avatar metadata
+      tags:
+      - Avatars
+  /api/v1/users/{user_id}/avatar:
+    delete:
+      parameters:
+      - description: User ID
+        in: path
+        name: user_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+      security:
+      - XUserID: []
+      summary: Delete active avatar of the user
+      tags:
+      - Users
+    get:
+      description: Returns the freshest avatar or a placeholder. Binary image.
+      parameters:
+      - description: User ID
+        in: path
+        name: user_id
+        required: true
+        type: string
+      produces:
+      - image/jpeg
+      - image/png
+      - image/webp
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+      summary: Active avatar of the user
+      tags:
+      - Users
+  /api/v1/users/{user_id}/avatars:
+    get:
+      description: Returns all non-deleted avatars of the user.
+      parameters:
+      - description: User ID
+        in: path
+        name: user_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.AvatarMetadataResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.ErrorResponse'
+      summary: List user avatars
+      tags:
+      - Users
+  /health:
+    get:
+      description: Checks PostgreSQL, S3/MinIO, RabbitMQ. Returns 200 if all are ok,
+        503 otherwise.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.HealthStatus'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_max-marek-projects_avatars-service_internal_models.HealthStatus'
+      summary: Liveness / readiness probe
+      tags:
+      - Health
+schemes:
+- http
+- https
+securityDefinitions:
+  XUserID:
+    description: Authenticated user ID (owner of the avatar).
+    in: header
+    name: X-User-ID
+    type: apiKey
+swagger: "2.0"

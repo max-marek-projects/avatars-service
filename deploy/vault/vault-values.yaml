@@ -1,0 +1,14 @@
+global:
+  security:
+    allowInsecureImages: true
+
+server:
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/vault
+    tag: 1.20.2-debian-12-r2
+  persistence:
+    enabled: true
+    size: 1Gi
+  standalone:
+    enabled: true
